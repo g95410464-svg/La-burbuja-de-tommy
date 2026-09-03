@@ -1,0 +1,53 @@
+/**
+ * index.css
+ * ─────────────────────────────────────────────────────────────────────────
+ * Hoja de estilos global. Incluye las tres capas de Tailwind y algunos
+ * ajustes base mínimos (fuente, scroll, selección de texto) que aplican
+ * a toda la aplicación y no tiene sentido repetir por componente.
+ *
+ * NOTA: la fuente "Baloo 2" se importa como paquete NPM (@fontsource) en
+ * lugar de vía Google Fonts CDN. Esto evita una petición de red externa
+ * en el arranque (mejor rendimiento y funciona incluso sin conexión tras
+ * el primer build), además de evitar el problema de que `@import` de una
+ * URL externa debe preceder a cualquier otra regla CSS, lo cual choca
+ * con el orden de las directivas `@tailwind`.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+
+/* Pesos de fuente necesarios: 400 (texto normal), 600/700 (énfasis), 800
+   (títulos). Usamos explícitamente los subconjuntos "latin" y "latin-ext"
+   (este último cubre acentos, ñ y demás caracteres del español) en vez
+   del CSS genérico, que incluiría también subsets innecesarios como
+   devanagari o vietnamese, aumentando el peso de la descarga sin razón. */
+@import '@fontsource/baloo-2/latin-400.css';
+@import '@fontsource/baloo-2/latin-600.css';
+@import '@fontsource/baloo-2/latin-700.css';
+@import '@fontsource/baloo-2/latin-800.css';
+@import '@fontsource/baloo-2/latin-ext-400.css';
+@import '@fontsource/baloo-2/latin-ext-600.css';
+@import '@fontsource/baloo-2/latin-ext-700.css';
+@import '@fontsource/baloo-2/latin-ext-800.css';
+@import '@fontsource/nunito/latin-400.css';
+@import '@fontsource/nunito/latin-700.css';
+@import '@fontsource/nunito/latin-ext-400.css';
+@import '@fontsource/nunito/latin-ext-700.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: 'Baloo 2', 'Nunito', system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent; /* evita el "flash" gris al tocar en móvil */
+  overscroll-behavior: none; /* evita el rebote de scroll que interfiere con el swipe del lector */
+}
+
+/* Selección de texto con los colores de marca, un detalle de pulido visual. */
+::selection {
+  background-color: #FFD166;
+  color: #2D2A32;
+}
