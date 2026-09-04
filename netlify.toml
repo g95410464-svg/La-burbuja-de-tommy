@@ -1,0 +1,4 @@
+[build]
+  base = "kindle-kids-app"
+  command = "npm run build"
+  publish = "dist"
