@@ -81,6 +81,17 @@ interface LibroPersistido extends Omit<Libro, 'fuente'> {
 }
 
 const NOMBRE_DB = 'kindle-kids-biblioteca';
+let usuarioBiblioteca: string | null = null;
+
+// Separate local collections by authenticated user. The original database is
+// retained for the unconfigured preview; never assign it to an arbitrary account.
+export function seleccionarBiblioteca(usuarioId: string | null) {
+  if (usuarioBiblioteca === usuarioId) return;
+  const anterior = promesaDB;
+  usuarioBiblioteca = usuarioId;
+  promesaDB = null;
+  anterior?.then(db => db.close()).catch(() => {});
+}
 const VERSION_DB = 2;
 const ALMACEN_LIBROS = 'libros';
 const ALMACEN_PROGRESO = 'progreso';
@@ -95,7 +106,7 @@ let promesaDB: Promise<IDBPDatabase<EsquemaBibliotecaDB>> | null = null;
 
 function obtenerConexionDB(): Promise<IDBPDatabase<EsquemaBibliotecaDB>> {
   if (!promesaDB) {
-    promesaDB = openDB<EsquemaBibliotecaDB>(NOMBRE_DB, VERSION_DB, {
+    promesaDB = openDB<EsquemaBibliotecaDB>(usuarioBiblioteca ? `${NOMBRE_DB}-${usuarioBiblioteca}` : NOMBRE_DB, VERSION_DB, {
       upgrade(db) {
         // `upgrade` solo se ejecuta si la versión de la DB cambia (o en
         // la primera creación). Aquí definimos los "almacenes" (tablas).

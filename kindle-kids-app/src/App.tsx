@@ -1,70 +1,42 @@
-/**
- * App.tsx
- * ─────────────────────────────────────────────────────────────────────────
- * Componente raíz. Gestiona la navegación entre las DOS vistas principales
- * de la app —Biblioteca y Lector— mediante un estado simple en memoria.
- *
- * DECISIÓN DE ARQUITECTURA: no usamos un router (react-router) porque la
- * app tiene solo dos "pantallas" conceptuales y no hay necesidad real de
- * URLs profundas por libro/página en esta primera versión. Introducir un
- * router aquí sería sobre-ingeniería (violación del principio YAGNI).
- * Si en el futuro se necesitara compartir enlaces directos a un libro,
- * este es el único archivo que habría que tocar para migrar a rutas.
- *
- * Todo el árbol se envuelve en `LimiteDeError` para cumplir el requisito
- * de robustez "indestructible": ningún error de render escapa a una
- * pantalla en blanco.
- * ─────────────────────────────────────────────────────────────────────────
- */
-
-import { useCallback, useState } from 'react';
-import type { Libro, ProgresoLectura } from './types/libro';
+import { useEffect, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import type { Libro } from './types/libro';
 import { PantallaBiblioteca } from './components/library/PantallaBiblioteca';
 import { PantallaLector } from './components/reader/PantallaLector';
 import { LimiteDeError } from './components/shared/LimiteDeError';
-
-/** Las dos vistas posibles de la aplicación. */
-type Vista = { nombre: 'biblioteca' } | { nombre: 'lector'; libro: Libro };
+import { Acceso } from './components/auth/Acceso';
+import { supabase } from './lib/supabase';
+import { seleccionarBiblioteca } from './lib/storageManager';
 
 function App() {
-  const [vista, setVista] = useState<Vista>({ nombre: 'biblioteca' });
-
-  const abrirLibro = useCallback((libro: Libro) => {
-    setVista({ nombre: 'lector', libro });
+  const [session, setSession] = useState<Session | null>(null);
+  const [cargando, setCargando] = useState(!!supabase);
+  const [preview, setPreview] = useState(false);
+  const [recuperando, setRecuperando] = useState(false);
+  const [libro, setLibro] = useState<Libro | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!supabase) return;
+    let activo = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((evento, nueva) => {
+      if (!activo) return;
+      seleccionarBiblioteca(nueva?.user.id ?? null);
+      setSession(nueva); setLibro(null); setCargando(false);
+      if (evento === 'PASSWORD_RECOVERY') setRecuperando(true);
+      if (evento === 'SIGNED_OUT') setRecuperando(false);
+    });
+    // INITIAL_SESSION is emitted by the SDK after restoring the session.
+    return () => { activo = false; subscription.unsubscribe(); };
   }, []);
-
-  const volverABiblioteca = useCallback(() => {
-    setVista({ nombre: 'biblioteca' });
-  }, []);
-
-  /**
-   * Callback "puente": cuando el lector actualiza el progreso de lectura,
-   * no necesitamos hacer nada especial aquí porque cada pantalla gestiona
-   * su propio estado (el hook `useBiblioteca` se re-monta al volver a la
-   * biblioteca y relee IndexedDB). Se deja el hook preparado por si en el
-   * futuro se decide compartir un estado global de progreso en tiempo
-   * real entre ambas vistas sin necesidad de desmontar/remontar.
-   */
-  const manejarProgresoActualizado = useCallback((_progreso: ProgresoLectura) => {
-    // Intencionalmente vacío: ver comentario superior.
-  }, []);
-
-  return (
-    <LimiteDeError>
-      {vista.nombre === 'biblioteca' && (
-        <PantallaBiblioteca onAbrirLibro={abrirLibro} />
-      )}
-
-      {vista.nombre === 'lector' && (
-        <PantallaLector
-          key={vista.libro.id}
-          libro={vista.libro}
-          onCerrar={volverABiblioteca}
-          onProgresoActualizado={manejarProgresoActualizado}
-        />
-      )}
-    </LimiteDeError>
-  );
+  const salir = async () => {
+    if (preview) { setPreview(false); setLibro(null); return; }
+    const resultado = await supabase?.auth.signOut({ scope: 'local' });
+    if (resultado?.error) setError('No pudimos cerrar sesión. Inténtalo nuevamente.');
+  };
+  return <LimiteDeError>{cargando ? <div className="inicio-cargando" role="status">Abriendo tu rincón de lectura…</div>
+    : (!session && !preview) || recuperando ? <Acceso onPreview={() => { seleccionarBiblioteca(null); setPreview(true); }} recuperando={recuperando} onRecuperado={() => setRecuperando(false)} />
+    : libro ? <PantallaLector key={libro.id} libro={libro} onCerrar={() => setLibro(null)} onProgresoActualizado={() => {}} />
+    : <><PantallaBiblioteca key={session?.user.id ?? 'preview'} nombre={session?.user.user_metadata?.nombre || 'lector'} preview={preview} onSalir={salir} onAbrirLibro={setLibro} />{error && <div role="alert" className="mensaje-error">{error}</div>}</>}
+  </LimiteDeError>;
 }
-
 export default App;

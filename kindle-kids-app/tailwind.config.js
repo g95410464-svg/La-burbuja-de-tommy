@@ -38,6 +38,7 @@ export default {
       fontFamily: {
         // Fuente redondeada y legible, típica de interfaces infantiles.
         cuento: ['"Baloo 2"', '"Nunito"', 'system-ui', 'sans-serif'],
+        serif: ['"Merriweather"', '"Times New Roman"', 'serif'],
       },
       borderRadius: {
         blob: '2rem',
@@ -45,10 +46,6 @@ export default {
       boxShadow: {
         libro: '0 20px 40px -12px rgba(45, 42, 50, 0.25)',
         boton: '0 6px 0 0 rgba(0,0,0,0.15)',
-      },
-      // Clases personalizadas usadas en PantallaLector
-      fontFamily: {
-        serif: ['"Merriweather"', '"Times New Roman"', 'serif'],
       },
       keyframes: {
         // Micro-interacción de "respiración" para invitar al toque.

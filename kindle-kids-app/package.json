@@ -7,14 +7,16 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@fontsource/baloo-2": "^5.3.0",
     "@fontsource/nunito": "^5.3.0",
+    "@supabase/supabase-js": "2.117.3",
     "idb": "^8.0.3",
     "lucide-react": "^1.31.0",
-    "pdfjs-dist": "5.7.284",
+    "pdfjs-dist": "^6.4.299",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-pageflip": "^2.0.3",
@@ -26,9 +28,11 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "autoprefixer": "^10.5.4",
+    "fake-indexeddb": "^6.2.5",
     "oxlint": "^1.75.0",
     "postcss": "^8.5.26",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
   }

@@ -2,3 +2,8 @@
   base = "kindle-kids-app"
   command = "npm run build"
   publish = "dist"
+
+# Public client configuration; never put secret or service_role keys here.
+[build.environment]
+  VITE_SUPABASE_URL = "https://wjnsukmxxykuvcwcxzgs.supabase.co"
+  VITE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_MvubTEI7W6syAfyQnL5bPg_4wLFJkBr"
