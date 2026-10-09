@@ -69,10 +69,9 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
     setControlesVisibles((previo) => !previo);
   }, []);
 
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
   return (
-    <div className="fixed inset-0 z-40 min-h-screen flex flex-col bg-stone-900 text-stone-100 font-serif leading-relaxed overflow-hidden">
+    <div className="fixed inset-0 z-40 h-[100dvh] flex flex-col bg-stone-900 text-stone-100 font-serif leading-relaxed overflow-hidden">
       {errorGuardado && <p role="alert" className="fixed top-16 left-4 right-4 z-50 mensaje-error">{errorGuardado}</p>}
       {/* ── Header superior ─────────────────────────────────────────── */}
       <header
@@ -95,7 +94,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
 
       {/* ── Área de lectura principal ───────────────────────────────── */}
       <div
-        className="flex-1 relative overflow-hidden flex flex-col items-center justify-center pt-14 pb-12 select-none"
+        className="flex-1 relative overflow-hidden flex flex-col items-center justify-center min-h-0 pt-20 pb-24 select-none"
         onClick={alternarControles}
       >
         {estadoCarga === 'cargando' && (
@@ -115,12 +114,12 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
 
         {estadoCarga === 'listo' && totalPaginas > 0 && (
           <div className="w-full h-full flex items-center justify-center p-2 sm:p-6">
-            <div className="relative max-w-4xl max-h-[calc(100vh-100px)] bg-[#fdfbf7] shadow-2xl rounded-md overflow-hidden flex items-center justify-center border border-stone-800">
+            <div className="relative max-w-4xl max-h-[calc(100dvh-176px)] bg-[#fdfbf7] shadow-2xl rounded-md overflow-hidden flex items-center justify-center border border-stone-800">
               {imagenPaginaActual ? (
                 <img
                   src={imagenPaginaActual}
                   alt={`Página ${paginaActual}`}
-                  className="max-w-full max-h-[calc(100vh-120px)] object-contain pointer-events-none"
+                  className="max-w-full max-h-[calc(100dvh-192px)] object-contain pointer-events-none"
                 />
               ) : (
                 <div className="p-12 text-stone-500 text-sm font-sans">
@@ -138,14 +137,15 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
         )}
 
         {/* ── Botones de navegación laterales ─────────────────────── */}
-        {!isMobile && (
+        {estadoCarga === 'listo' && (
           <>
             <button
               onClick={(evento) => {
                 evento.stopPropagation();
                 paginaAnterior();
               }}
-              className="absolute top-1/2 -translate-y-1/2 left-4 z-30 w-14 h-14 rounded-full bg-black/50 hover:bg-black/75 text-white flex items-center justify-center shadow-xl transition-all duration-150 ease-out active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuento-amarillo"
+              className="hidden md:flex absolute top-1/2 -translate-y-1/2 left-4 z-30 w-14 h-14 rounded-full bg-black/50 hover:bg-black/75 text-white items-center justify-center shadow-xl transition-all duration-150 ease-out active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuento-amarillo"
+              disabled={paginaActual <= 1 || cargandoPagina}
               aria-label="Página anterior"
             >
               <ChevronLeft size={30} />
@@ -155,7 +155,8 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
                 evento.stopPropagation();
                 paginaSiguiente();
               }}
-              className="absolute top-1/2 -translate-y-1/2 right-4 z-30 w-14 h-14 rounded-full bg-black/50 hover:bg-black/75 text-white flex items-center justify-center shadow-xl transition-all duration-150 ease-out active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuento-amarillo"
+              className="hidden md:flex absolute top-1/2 -translate-y-1/2 right-4 z-30 w-14 h-14 rounded-full bg-black/50 hover:bg-black/75 text-white items-center justify-center shadow-xl transition-all duration-150 ease-out active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuento-amarillo"
+              disabled={paginaActual >= totalPaginas || cargandoPagina}
               aria-label="Página siguiente"
             >
               <ChevronRight size={30} />
@@ -163,19 +164,26 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
           </>
         )}
 
-        {/* ── Indicador de página inferior ────────────────────────────── */}
+        {/* Always available on touch screens, even when the header is hidden. */}
         <footer
-          className={`fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-6 py-2.5 bg-stone-950/80 backdrop-blur-md text-stone-300 text-xs font-sans border-t border-stone-800/50 transition-transform duration-300 ease-out ${
-            controlesVisibles ? 'translate-y-0' : 'translate-y-full'
-          }`}
+          onClick={evento => evento.stopPropagation()}
+          className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between gap-3 px-4 sm:px-6 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] bg-stone-950/95 text-stone-300 text-xs font-sans border-t border-stone-800"
         >
-          <span>
-            Página <strong className="text-white">{paginaActual}</strong> de{' '}
-            <strong className="text-white">{totalPaginas}</strong>
+          <button type="button" onClick={paginaAnterior}
+            disabled={estadoCarga !== 'listo' || paginaActual <= 1 || cargandoPagina}
+            aria-label="Ir a la página anterior"
+            className="flex min-h-12 min-w-12 items-center justify-center gap-1 rounded-xl bg-white/10 px-3 text-white disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-cuento-amarillo">
+            <ChevronLeft size={24} /><span className="hidden sm:inline">Anterior</span>
+          </button>
+          <span role="status" aria-live="polite" className="text-center">
+            Página <strong className="text-white">{paginaActual}</strong> de <strong className="text-white">{totalPaginas}</strong>
           </span>
-          <span className="text-stone-400 text-[11px]">
-            Usa las flechas o los botones laterales
-          </span>
+          <button type="button" onClick={paginaSiguiente}
+            disabled={estadoCarga !== 'listo' || paginaActual >= totalPaginas || cargandoPagina}
+            aria-label="Ir a la página siguiente"
+            className="flex min-h-12 min-w-12 items-center justify-center gap-1 rounded-xl bg-white/10 px-3 text-white disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-cuento-amarillo">
+            <span className="hidden sm:inline">Siguiente</span><ChevronRight size={24} />
+          </button>
         </footer>
       </div>
     </div>
