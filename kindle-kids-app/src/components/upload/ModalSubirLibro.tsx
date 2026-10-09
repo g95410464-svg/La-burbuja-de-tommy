@@ -90,7 +90,7 @@ export function ModalSubirLibro({ abierto, onCerrar, onLibroAgregado }: Propieda
           Agregar un cuento nuevo
         </h2>
         <p className="font-cuento text-sm text-cuento-tintaSuave mb-5">
-          Se guardará en este dispositivo para leerlo cuando quieras.
+          Se guardará en este dispositivo y se enviará a tu nube cuando haya conexión. PDF de hasta 50 MB.
         </p>
 
         {fase === 'esperando' && (

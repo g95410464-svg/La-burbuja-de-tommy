@@ -36,6 +36,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
     paginaAnterior,
   } = usePdfReader(libro.fuente, libro.id);
 
+  const [errorGuardado, setErrorGuardado] = useState('');
   const [controlesVisibles, setControlesVisibles] = useState(true);
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
       completado: paginaActual >= totalPaginas,
     };
 
-    guardarProgreso(progreso);
+    guardarProgreso(progreso).catch(() => setErrorGuardado('No se pudo guardar el avance. Comprueba el espacio disponible.'));
     onProgresoActualizado(progreso);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paginaActual, estadoCarga, totalPaginas, libro.id]);
@@ -72,6 +73,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
 
   return (
     <div className="fixed inset-0 z-40 min-h-screen flex flex-col bg-stone-900 text-stone-100 font-serif leading-relaxed overflow-hidden">
+      {errorGuardado && <p role="alert" className="fixed top-16 left-4 right-4 z-50 mensaje-error">{errorGuardado}</p>}
       {/* ── Header superior ─────────────────────────────────────────── */}
       <header
         className={`fixed top-0 left-0 right-0 z-50 gradient-header flex items-center gap-4 px-4 sm:px-6 py-3 backdrop-blur-md transition-transform duration-300 ease-out ${

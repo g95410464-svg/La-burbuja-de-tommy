@@ -13,6 +13,9 @@ import type { Libro, ProgresoLectura } from '../../types/libro';
 
 interface PropiedadesTarjetaLibro {
   libro: Libro;
+  ocupado?: boolean;
+  onDescargar?: (libro: Libro) => void;
+  onQuitarDescarga?: (id: string) => void;
   progreso?: ProgresoLectura;
   onAbrir: (libro: Libro) => void;
   onEliminar?: (libro: Libro) => void;
@@ -22,6 +25,9 @@ interface PropiedadesTarjetaLibro {
 
 export function TarjetaLibro({
   libro,
+  ocupado,
+  onDescargar,
+  onQuitarDescarga,
   progreso,
   onAbrir,
   onEliminar,
@@ -45,6 +51,7 @@ export function TarjetaLibro({
       style={{ animationDelay: `${Math.min(indice * 60, 600)}ms` }}
     >
       <button
+        disabled={ocupado}
         onClick={() => onAbrir(libro)}
         className="relative rounded-blob overflow-hidden aspect-[3/4] w-full shadow-libro
                    transition-transform duration-300 ease-out
@@ -115,6 +122,11 @@ export function TarjetaLibro({
             🗑️
           </button>
         )}
+      </div>
+      <div className="acciones-nube">
+        <span>{ocupado ? 'Descargando…' : libro.sincronizado ? libro.disponibleLocal ? 'Disponible sin conexión' : 'En la nube' : 'Pendiente de sincronizar'}</span>
+        {!libro.disponibleLocal && onDescargar && <button disabled={ocupado} onClick={() => onDescargar(libro)}>Descargar para leer sin conexión</button>}
+        {libro.disponibleLocal && libro.sincronizado && onQuitarDescarga && <button disabled={ocupado} onClick={() => onQuitarDescarga(libro.id)}>Quitar descarga</button>}
       </div>
     </div>
   );

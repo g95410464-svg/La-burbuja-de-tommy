@@ -42,6 +42,8 @@ export type FuentePdf =
  * lugar de mutar el existente, siguiendo buenas prácticas de estado en React.
  */
 export interface Libro {
+  disponibleLocal?: boolean;
+  sincronizado?: boolean;
   /** Identificador único (uuid para subidos, slug fijo para los base). */
   id: string;
   /** Título mostrado en la biblioteca y en el lector. */

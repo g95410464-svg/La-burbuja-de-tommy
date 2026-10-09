@@ -23,8 +23,8 @@ import {
   destruirDocumentoPdf,
 } from './pdf';
 
-/** Tamaño máximo aceptado para un PDF subido: 60 MB. */
-export const TAMANO_MAXIMO_MB = 60;
+/** Tamaño máximo aceptado para un PDF subido: 50 MB. */
+export const TAMANO_MAXIMO_MB = 50;
 const TAMANO_MAXIMO_BYTES = TAMANO_MAXIMO_MB * 1024 * 1024;
 
 /**

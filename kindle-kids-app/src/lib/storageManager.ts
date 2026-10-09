@@ -1,368 +1,145 @@
-/**
- * lib/storageManager.ts
- * ─────────────────────────────────────────────────────────────────────────
- * CAPA DE INFRAESTRUCTURA: persistencia local con IndexedDB.
- *
- * ¿Por qué IndexedDB y no LocalStorage?
- * LocalStorage tiene un límite muy bajo (~5MB) y es síncrono/bloqueante,
- * además de que solo admite strings. Los PDFs de libros ilustrados pesan
- * varios MB cada uno, así que LocalStorage sería inviable e insuficiente.
- * IndexedDB permite guardar Blobs binarios de forma asíncrona y con
- * cuotas de almacenamiento mucho mayores (habitualmente cientos de MB o
- * más, según el navegador).
- *
- * Usamos la librería `idb` (de Jake Archibald) porque envuelve la API
- * nativa de IndexedDB —basada en eventos y bastante verbosa— en una
- * interfaz moderna basada en Promesas, sin añadir lógica de negocio.
- *
- * Principio SOLID aplicado: "Single Responsibility". Este módulo SOLO
- * sabe leer/escribir en IndexedDB. No sabe nada de PDF.js, ni de React,
- * ni de cómo se ve un Libro en pantalla.
- * ─────────────────────────────────────────────────────────────────────────
- */
-
-import { openDB, type IDBPDatabase, type DBSchema } from 'idb';
+import { openDB, type DBSchema } from 'idb';
 import type { Libro, ProgresoLectura, Resultado } from '../types/libro';
 import type { ResultadoOcrPagina } from '../types/ocr';
 
-/**
- * Definición tipada del esquema de la base de datos. Usar `DBSchema` de
- * `idb` nos da autocompletado y chequeo de tipos en cada operación,
- * evitando errores de "typo" en nombres de almacenes (object stores).
- *
- * Almacenes:
- *  - `libros`:   libros subidos (id → LibroPersistido).
- *  - `progreso`: progreso de lectura (libroId → ProgresoLectura).
- *  - `ocrCache`: resultados OCR cacheados por página, con una clave
- *    única tipo string "libroId:pagina" (un `IDBValidKey`).
- */
-interface EsquemaBibliotecaDB extends DBSchema {
-  libros: {
-    key: string;
-    value: LibroPersistido;
+export interface RegistroLibro extends Omit<Libro, 'fuente'> {
+  pdfBlob?: Blob;
+  sincronizado?: boolean;
+  borrado?: boolean;
+}
+export interface ProgresoLocal extends ProgresoLectura { revision?: string; pendiente?: boolean }
+export interface ResultadoOcrCacheado extends ResultadoOcrPagina { clave: string }
+interface Esquema extends DBSchema {
+  libros: { key: string; value: RegistroLibro };
+  progreso: { key: string; value: ProgresoLocal };
+  ocrCache: { key: string; value: ResultadoOcrCacheado };
+}
+const conexiones = new Map<string, ReturnType<typeof openDB<Esquema>>>();
+let usuario: string | null = null;
+export function seleccionarBiblioteca(id: string | null) { usuario = id; }
+export function usuarioActual() { return usuario; }
+export const avisarCambio = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event('biblioteca-cambio')); };
+export const convertirLibro = (r: RegistroLibro): Libro => {
+  const { pdfBlob, ...datos } = r;
+  return { ...datos, disponibleLocal: !!pdfBlob, fuente: pdfBlob ? { tipo: 'blob', blob: pdfBlob } : { tipo: 'url', url: '' } };
+};
+
+// Each operation captures its account database before awaiting: switching accounts
+// must never redirect an in-flight read, upload or acknowledgement to another user.
+export function bibliotecaLocal(id: string | null = usuario) {
+  const nombre = id ? `kindle-kids-biblioteca-${id}` : 'kindle-kids-biblioteca';
+  const conexion = conexiones.get(nombre) ?? openDB<Esquema>(nombre, 2, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains('libros')) db.createObjectStore('libros', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('progreso')) db.createObjectStore('progreso', { keyPath: 'libroId' });
+      if (!db.objectStoreNames.contains('ocrCache')) db.createObjectStore('ocrCache', { keyPath: 'clave' });
+    },
+  });
+  conexiones.set(nombre, conexion);
+  return {
+    id,
+    async registros() { return (await conexion).getAll('libros'); },
+    async registro(libroId: string) { return (await conexion).get('libros', libroId); },
+    async libros() { return (await this.registros()).filter(r => !r.borrado).map(convertirLibro); },
+    async guardar(libro: Libro, blob: Blob) {
+      const { fuente: _, ...datos } = libro;
+      await (await conexion).put('libros', { ...datos, pdfBlob: blob, sincronizado: false });
+      avisarCambio();
+    },
+    async recibir(remoto: RegistroLibro) {
+      const db = await conexion;
+      const tx = db.transaction(['libros','progreso','ocrCache'], 'readwrite');
+      const anterior = await tx.objectStore('libros').get(remoto.id);
+      if (remoto.borrado) {
+        // Keep the tombstone so another device cannot resurrect this ID.
+        await tx.objectStore('libros').put({ ...remoto, pdfBlob: undefined, sincronizado: true });
+        await tx.objectStore('progreso').delete(remoto.id);
+        for (const r of await tx.objectStore('ocrCache').getAll()) if (r.libroId === remoto.id) await tx.objectStore('ocrCache').delete(r.clave);
+      } else if (!anterior?.borrado) {
+        await tx.objectStore('libros').put({ ...remoto, pdfBlob: anterior?.pdfBlob, sincronizado: true });
+      }
+      await tx.done;
+    },
+    async confirmarSubida(libroId: string) {
+      const tx = (await conexion).transaction('libros','readwrite');
+      const r = await tx.store.get(libroId);
+      if (r && !r.borrado) await tx.store.put({ ...r, sincronizado: true });
+      await tx.done;
+    },
+    async guardarDescarga(libroId: string, blob: Blob) {
+      const tx = (await conexion).transaction('libros','readwrite');
+      const r = await tx.store.get(libroId);
+      if (!r || r.borrado) { await tx.done; throw new Error('Este cuento ya no está en tu biblioteca.'); }
+      await tx.store.put({ ...r, pdfBlob: blob });
+      await tx.done;
+      avisarCambio();
+      return convertirLibro({ ...r, pdfBlob: blob });
+    },
+    async quitarDescarga(libroId: string) {
+      const tx = (await conexion).transaction(['libros','ocrCache'],'readwrite');
+      const r = await tx.objectStore('libros').get(libroId);
+      if (!r?.sincronizado || r.borrado) { await tx.done; throw new Error('Espera a que el cuento se guarde en la nube.'); }
+      await tx.objectStore('libros').put({ ...r, pdfBlob: undefined });
+      for (const ocr of await tx.objectStore('ocrCache').getAll()) if (ocr.libroId === libroId) await tx.objectStore('ocrCache').delete(ocr.clave);
+      await tx.done;
+      avisarCambio();
+    },
+    async eliminar(libroId: string) {
+      const tx = (await conexion).transaction(['libros','progreso','ocrCache'],'readwrite');
+      const r = await tx.objectStore('libros').get(libroId);
+      if (r) await tx.objectStore('libros').put({ ...r, borrado: true, sincronizado: false, pdfBlob: undefined });
+      await tx.objectStore('progreso').delete(libroId);
+      for (const ocr of await tx.objectStore('ocrCache').getAll()) if (ocr.libroId === libroId) await tx.objectStore('ocrCache').delete(ocr.clave);
+      await tx.done;
+      avisarCambio();
+    },
+    async progresos() { return (await conexion).getAll('progreso'); },
+    async progreso(libroId: string) { return (await conexion).get('progreso',libroId); },
+    async guardarProgreso(p: ProgresoLectura) {
+      const tx = (await conexion).transaction(['progreso','libros'],'readwrite');
+      if ((await tx.objectStore('libros').get(p.libroId))?.borrado) { await tx.done; return; }
+      const anterior = await tx.objectStore('progreso').get(p.libroId);
+      await tx.objectStore('progreso').put({ ...p, completado: p.completado || !!anterior?.completado, pendiente: true, revision: crypto.randomUUID() });
+      await tx.done;
+      avisarCambio();
+    },
+    async recibirProgreso(p: ProgresoLectura, revisionConfirmada?: string) {
+      const tx = (await conexion).transaction(['progreso','libros'],'readwrite');
+      const libro = await tx.objectStore('libros').get(p.libroId);
+      if (!libro || libro.borrado) { await tx.done; return; }
+      const anterior = await tx.objectStore('progreso').get(p.libroId);
+      const masReciente = anterior && anterior.ultimaLectura > p.ultimaLectura ? anterior : p;
+      // Acknowledging an older upload cannot erase a new offline page change.
+      const pendiente = !!anterior?.pendiente && anterior.revision !== revisionConfirmada;
+      await tx.objectStore('progreso').put({ ...masReciente, completado: p.completado || !!anterior?.completado, pendiente, revision: anterior?.revision });
+      await tx.done;
+    },
+    async guardarOcr(r: ResultadoOcrPagina) { await (await conexion).put('ocrCache',{ ...r, clave: JSON.stringify([r.libroId,r.pagina]) }); },
+    async ocr(libroId: string, pagina: number) { return (await conexion).get('ocrCache',JSON.stringify([libroId,pagina])); },
+    async borrarOcr(libroId: string) {
+      const tx = (await conexion).transaction('ocrCache','readwrite');
+      for (const r of await tx.store.getAll()) if (r.libroId === libroId) await tx.store.delete(r.clave);
+      await tx.done;
+    },
   };
-  progreso: {
-    key: string;
-    value: ProgresoLectura;
-  };
-  ocrCache: {
-    key: string;
-    value: ResultadoOcrCacheado;
-  };
 }
-
-/**
- * Resultado OCR tal como se guarda en IndexedDB: el `ResultadoOcrPagina`
- * más el campo `clave` que actúa como keyPath del almacén. La clave es
- * una cadena única `"libroId:pagina"` (un `IDBValidKey` válido), y
- * `libroId`/`pagina` se conservan como campos para poder filtrar.
- */
-export interface ResultadoOcrCacheado extends ResultadoOcrPagina {
-  clave: string;
+export async function guardarLibro(libro: Libro, blob: Blob): Promise<Resultado<void>> {
+  try { await bibliotecaLocal().guardar(libro,blob); return { ok:true, valor:undefined }; }
+  catch { return {ok:false,error:'No se pudo guardar el PDF. Comprueba el espacio disponible en este dispositivo.'}; }
 }
-
-/**
- * Construye la clave única del cache OCR para un libro y una página.
- * Usamos `JSON.stringify` de un par para evitar colisiones si el
- * `libroId` contuviera el carácter separador.
- */
-function claveOcrDe(libroId: string, pagina: number): string {
-  return JSON.stringify([libroId, pagina]);
+export const obtenerLibrosGuardados = () => bibliotecaLocal().libros();
+export async function eliminarLibro(id: string): Promise<Resultado<void>> {
+  try { await bibliotecaLocal().eliminar(id); return {ok:true,valor:undefined}; }
+  catch { return {ok:false,error:'No se pudo eliminar el cuento.'}; }
 }
-
-/**
- * Representación de un libro TAL COMO se guarda en IndexedDB. Es distinta
- * del tipo `Libro` del dominio porque aquí el PDF se guarda siempre como
- * Blob nativo (nunca como URL), y no persistimos el campo `fuente`
- * genérico sino directamente el blob binario, más eficiente para IndexedDB.
- */
-interface LibroPersistido extends Omit<Libro, 'fuente'> {
-  pdfBlob: Blob;
+export const guardarProgreso = (p: ProgresoLectura) => bibliotecaLocal().guardarProgreso(p);
+export const obtenerProgreso = async (id: string) => (await bibliotecaLocal().progreso(id)) ?? null;
+export const obtenerTodoElProgreso = async () => Object.fromEntries((await bibliotecaLocal().progresos()).map(p => [p.libroId,p]));
+export async function guardarOcrCache(r: ResultadoOcrPagina): Promise<Resultado<void>> {
+  try { await bibliotecaLocal().guardarOcr(r); return {ok:true,valor:undefined}; }
+  catch { return {ok:false,error:'No se pudo guardar OCR.'}; }
 }
-
-const NOMBRE_DB = 'kindle-kids-biblioteca';
-let usuarioBiblioteca: string | null = null;
-
-// Separate local collections by authenticated user. The original database is
-// retained for the unconfigured preview; never assign it to an arbitrary account.
-export function seleccionarBiblioteca(usuarioId: string | null) {
-  if (usuarioBiblioteca === usuarioId) return;
-  const anterior = promesaDB;
-  usuarioBiblioteca = usuarioId;
-  promesaDB = null;
-  anterior?.then(db => db.close()).catch(() => {});
+export async function obtenerOcrCache(id: string,pagina: number,version: number) {
+  const r=await bibliotecaLocal().ocr(id,pagina); return r?.versionProcesador===version ? r : null;
 }
-const VERSION_DB = 2;
-const ALMACEN_LIBROS = 'libros';
-const ALMACEN_PROGRESO = 'progreso';
-const ALMACEN_OCR_CACHE = 'ocrCache';
-
-/**
- * Promesa singleton de la conexión a la base de datos. La inicializamos
- * una única vez (patrón "lazy singleton") y la reutilizamos en todas las
- * operaciones, evitando abrir conexiones redundantes.
- */
-let promesaDB: Promise<IDBPDatabase<EsquemaBibliotecaDB>> | null = null;
-
-function obtenerConexionDB(): Promise<IDBPDatabase<EsquemaBibliotecaDB>> {
-  if (!promesaDB) {
-    promesaDB = openDB<EsquemaBibliotecaDB>(usuarioBiblioteca ? `${NOMBRE_DB}-${usuarioBiblioteca}` : NOMBRE_DB, VERSION_DB, {
-      upgrade(db) {
-        // `upgrade` solo se ejecuta si la versión de la DB cambia (o en
-        // la primera creación). Aquí definimos los "almacenes" (tablas).
-        //
-        // MIGRACIÓN COMPATIBLE HACIA ATRÁS: los almacenes existentes
-        // (`libros`, `progreso`) se conservan intactos si ya existen
-        // (comprobación `if`). La única adición es `ocrCache`, que se
-        // crea de forma no destructiva. Los libros y el progreso ya
-        // guardados NO se tocan.
-        if (!db.objectStoreNames.contains(ALMACEN_LIBROS)) {
-          db.createObjectStore(ALMACEN_LIBROS, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(ALMACEN_PROGRESO)) {
-          db.createObjectStore(ALMACEN_PROGRESO, { keyPath: 'libroId' });
-        }
-        if (!db.objectStoreNames.contains(ALMACEN_OCR_CACHE)) {
-          db.createObjectStore(ALMACEN_OCR_CACHE, { keyPath: 'clave' });
-        }
-      },
-    });
-  }
-  return promesaDB;
-}
-
-/**
- * Guarda (crea o actualiza) un libro subido por el usuario, incluyendo su
- * PDF binario. Devuelve un `Resultado` para que la UI pueda mostrar un
- * mensaje amigable si el navegador rechaza la escritura (por ejemplo,
- * por cuota de almacenamiento agotada).
- */
-export async function guardarLibro(
-  libro: Libro,
-  pdfBlob: Blob
-): Promise<Resultado<void>> {
-  try {
-    const db = await obtenerConexionDB();
-
-    // Separamos `fuente` del objeto porque no queremos persistir una
-    // referencia a un Blob "en memoria" dos veces; el blob real va en
-    // su propio campo `pdfBlob`, ya adaptado al esquema de persistencia.
-    const { fuente: _fuenteIgnorada, ...datosLibro } = libro;
-
-    const libroPersistido: LibroPersistido = {
-      ...datosLibro,
-      pdfBlob,
-    };
-
-    await db.put(ALMACEN_LIBROS, libroPersistido);
-    return { ok: true, valor: undefined };
-  } catch (error) {
-    console.error('[storageManager] Error al guardar el libro:', error);
-    return {
-      ok: false,
-      error:
-        'No se pudo guardar el libro en tu dispositivo. Es posible que no quede espacio de almacenamiento.',
-    };
-  }
-}
-
-/**
- * Recupera todos los libros subidos por el usuario y guardados en
- * IndexedDB, ya reconstruidos como entidades `Libro` del dominio (con su
- * `fuente` de tipo 'blob' lista para usar).
- *
- * Si la base de datos está vacía o inaccesible, devuelve un array vacío
- * en lugar de lanzar una excepción: la biblioteca simplemente se muestra
- * sin libros adicionales, sin romper la aplicación.
- */
-export async function obtenerLibrosGuardados(): Promise<Libro[]> {
-  try {
-    const db = await obtenerConexionDB();
-    const registros = await db.getAll(ALMACEN_LIBROS);
-
-    return registros.map((registro) => {
-      const { pdfBlob, ...resto } = registro;
-      const libro: Libro = {
-        ...resto,
-        fuente: { tipo: 'blob', blob: pdfBlob },
-      };
-      return libro;
-    });
-  } catch (error) {
-    console.error('[storageManager] Error al leer libros guardados:', error);
-    return [];
-  }
-}
-
-/**
- * Elimina un libro guardado y su progreso asociado. Usamos una
- * transacción única para que ambas operaciones sean atómicas: o se
- * borran las dos cosas, o no se borra ninguna, evitando estados
- * inconsistentes (por ejemplo, progreso "huérfano" de un libro borrado).
- */
-export async function eliminarLibro(libroId: string): Promise<Resultado<void>> {
-  try {
-    const db = await obtenerConexionDB();
-
-    // Eliminamos el libro, su progreso y su cache OCR de forma
-    // coordinada. El cache OCR se borra aparte (no comparte clave con
-    // los otros dos), pero la operación no es crítica si falla.
-    const tx = db.transaction([ALMACEN_LIBROS, ALMACEN_PROGRESO], 'readwrite');
-
-    await Promise.all([
-      tx.objectStore(ALMACEN_LIBROS).delete(libroId),
-      tx.objectStore(ALMACEN_PROGRESO).delete(libroId),
-      tx.done,
-    ]);
-
-    // Limpieza del cache OCR asociado (best-effort, no bloqueante).
-    await eliminarOcrDeLibro(libroId);
-
-    return { ok: true, valor: undefined };
-  } catch (error) {
-    console.error('[storageManager] Error al eliminar el libro:', error);
-    return { ok: false, error: 'No se pudo eliminar el libro.' };
-  }
-}
-
-/**
- * Guarda o actualiza el progreso de lectura de un libro. Se llama con
- * frecuencia (cada cambio de página), por lo que la operación se
- * mantiene deliberadamente ligera (un único `put`).
- */
-export async function guardarProgreso(progreso: ProgresoLectura): Promise<void> {
-  try {
-    const db = await obtenerConexionDB();
-    await db.put(ALMACEN_PROGRESO, progreso);
-  } catch (error) {
-    // El progreso de lectura es "nice to have", no crítico: si falla el
-    // guardado, solo lo registramos en consola sin interrumpir la
-    // experiencia de lectura del niño o niña con un mensaje de error.
-    console.warn('[storageManager] No se pudo guardar el progreso:', error);
-  }
-}
-
-/**
- * Recupera el progreso de lectura guardado para un libro concreto, o
- * `null` si nunca se ha leído.
- */
-export async function obtenerProgreso(
-  libroId: string
-): Promise<ProgresoLectura | null> {
-  try {
-    const db = await obtenerConexionDB();
-    const progreso = await db.get(ALMACEN_PROGRESO, libroId);
-    return progreso ?? null;
-  } catch (error) {
-    console.warn('[storageManager] No se pudo leer el progreso:', error);
-    return null;
-  }
-}
-
-/**
- * Recupera TODO el progreso guardado, indexado por libroId, para poder
- * mostrar barras de progreso en las tarjetas de la biblioteca sin hacer
- * una consulta por cada libro individualmente.
- */
-export async function obtenerTodoElProgreso(): Promise<Record<string, ProgresoLectura>> {
-  try {
-    const db = await obtenerConexionDB();
-    const registros = await db.getAll(ALMACEN_PROGRESO);
-    return Object.fromEntries(registros.map((p) => [p.libroId, p]));
-  } catch (error) {
-    console.warn('[storageManager] No se pudo leer el progreso completo:', error);
-    return {};
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════
- * CACHE OCR
- * ─────────────────────────────────────────────────────────────────────
- * El OCR es costoso. Nunca repetimos OCR sobre una página cuyo
- * resultado ya se obtuvo correctamente.
- *
- * Almacenamos el resultado por `libroId + numeroPagina` (clave
- * compuesta). La `versionProcesador` permite invalidar OCR antiguo
- * cuando mejoremos el algoritmo: si la versión guardada no coincide
- * con la actual, se ignora el cache (se trata como si no existiera).
- *
- * Estructura del registro guardado:
- *  { libroId, pagina, textoBruto, textoLimpio, confianza, tieneTexto,
- *    fechaProcesamiento, versionProcesador }
- * ═══════════════════════════════════════════════════════════════════ */
-
-/**
- * Guarda (o actualiza) el resultado OCR de una página en el cache.
- * La versión del procesador se lee del propio resultado.
- */
-export async function guardarOcrCache(
-  resultado: ResultadoOcrPagina
-): Promise<Resultado<void>> {
-  try {
-    const db = await obtenerConexionDB();
-    const registro: ResultadoOcrCacheado = {
-      ...resultado,
-      clave: claveOcrDe(resultado.libroId, resultado.pagina),
-    };
-    await db.put(ALMACEN_OCR_CACHE, registro);
-    return { ok: true, valor: undefined };
-  } catch (error) {
-    // El cache OCR es "nice to have": si falla, simplemente se repetirá
-    // el OCR la próxima vez. No debe romper el flujo de lectura.
-    console.warn('[storageManager] No se pudo guardar el OCR en cache:', error);
-    return { ok: false, error: 'No se pudo guardar el OCR en cache.' };
-  }
-}
-
-/**
- * Recupera el resultado OCR cacheado de una página, PERO solo si la
- * `versionProcesador` guardada coincide con la versión actual del
- * procesador. Si no coincide (algoritmo mejorado) o no existe, devuelve
- * `null` para que el llamador ejecute OCR de nuevo.
- */
-export async function obtenerOcrCache(
-  libroId: string,
-  pagina: number,
-  versionProcesador: number
-): Promise<ResultadoOcrPagina | null> {
-  try {
-    const db = await obtenerConexionDB();
-    const resultado = await db.get(ALMACEN_OCR_CACHE, claveOcrDe(libroId, pagina));
-    if (!resultado) return null;
-
-    // Invalidación por versión del procesador.
-    if (resultado.versionProcesador !== versionProcesador) return null;
-
-    return resultado;
-  } catch (error) {
-    // Si IndexedDB falla, tratamos como "sin cache" (ejecutar OCR).
-    console.warn('[storageManager] No se pudo leer el OCR cacheado:', error);
-    return null;
-  }
-}
-
-/**
- * Elimina todos los resultados OCR cacheados de un libro. Útil cuando
- * se borra un libro (junto con `eliminarLibro`) para no dejar datos
- * huérfanos.
- */
-export async function eliminarOcrDeLibro(libroId: string): Promise<void> {
-  try {
-    const db = await obtenerConexionDB();
-    const registros = await db.getAll(ALMACEN_OCR_CACHE);
-    const clavesA_Eliminar = registros
-      .filter((r) => r.libroId === libroId)
-      .map((r) => r.clave);
-
-    if (clavesA_Eliminar.length === 0) return;
-
-    const tx = db.transaction(ALMACEN_OCR_CACHE, 'readwrite');
-    await Promise.all([
-      ...clavesA_Eliminar.map((clave) => tx.objectStore(ALMACEN_OCR_CACHE).delete(clave)),
-      tx.done,
-    ]);
-  } catch (error) {
-    // No es crítico: los datos huérfanos solo ocupan espacio.
-    console.warn('[storageManager] No se pudo limpiar el OCR de un libro borrado:', error);
-  }
-}
+export const eliminarOcrDeLibro = (id: string) => bibliotecaLocal().borrarOcr(id);

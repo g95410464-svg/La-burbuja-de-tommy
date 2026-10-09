@@ -32,6 +32,7 @@ import {
 } from '../lib/pdf';
 import { ServicioOcr } from '../lib/ocr/ServicioOcr';
 import { TesseractOcr } from '../lib/ocr/TesseractOcr';
+import { bibliotecaLocal } from '../lib/storageManager';
 
 type EstadoCarga = 'inactivo' | 'cargando' | 'listo' | 'error';
 
@@ -370,8 +371,10 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
       mensajeError: null,
     });
 
+    const local = bibliotecaLocal();
     (async () => {
       try {
+        const progreso = libroId ? await local.progreso(libroId) : null;
         const buffer = await obtenerBufferDesdeFuente(fuente);
 
         // Condición de carrera: si durante la descarga/lectura el
@@ -398,13 +401,14 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
         gestionadoRef.current = resultado.valor;
         documentoRef.current = resultado.valor.documento;
 
+        const inicial = Math.max(1, Math.min(progreso?.paginaActual ?? 1, resultado.valor.documento.numPages));
         setEstado((previo) => ({
           ...previo,
           estadoCarga: 'listo',
+          paginaActual: inicial,
           totalPaginas: resultado.valor.documento.numPages,
         }));
-
-        await irAPagina(1);
+        await irAPagina(inicial);
       } catch (error) {
         if (idCargaActual !== idCargaVigenteRef.current) return;
 
