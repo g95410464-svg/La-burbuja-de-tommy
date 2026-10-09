@@ -11,7 +11,8 @@ import {
   ChevronRight,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { Libro, ProgresoLectura } from '../../types/libro';
 import { usePdfReader } from '../../hooks/usePdfReader';
 import { guardarProgreso } from '../../lib/storageManager';
@@ -35,6 +36,10 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
     paginaSiguiente,
     paginaAnterior,
   } = usePdfReader(libro.fuente, libro.id);
+
+  const gesto = useRef<{ id: number; x: number; y: number } | null>(null);
+  const omitirClick = useRef(false);
+  const [arrastre, setArrastre] = useState(0);
 
   const [errorGuardado, setErrorGuardado] = useState('');
   const [controlesVisibles, setControlesVisibles] = useState(true);
@@ -66,8 +71,51 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
   }, [paginaSiguiente, paginaAnterior, onCerrar]);
 
   const alternarControles = useCallback(() => {
+    if (omitirClick.current) { omitirClick.current = false; return; }
     setControlesVisibles((previo) => !previo);
   }, []);
+
+
+  const iniciarGesto = (evento: ReactPointerEvent<HTMLDivElement>) => {
+    if (!evento.isPrimary) {
+      gesto.current = null; setArrastre(0); omitirClick.current = true;
+      return;
+    }
+    omitirClick.current = false;
+    if (estadoCarga !== 'listo' || cargandoPagina || evento.button !== 0 ||
+        (evento.target as HTMLElement).closest('button, a, input')) return;
+    gesto.current = { id: evento.pointerId, x: evento.clientX, y: evento.clientY };
+    evento.currentTarget.setPointerCapture(evento.pointerId);
+  };
+  const moverGesto = (evento: ReactPointerEvent<HTMLDivElement>) => {
+    const inicio = gesto.current;
+    if (!inicio || inicio.id !== evento.pointerId) return;
+    const dx = evento.clientX - inicio.x;
+    const dy = evento.clientY - inicio.y;
+    if (Math.hypot(dx, dy) > 10) omitirClick.current = true;
+    if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx) * 1.3) {
+      gesto.current = null; setArrastre(0); return;
+    }
+    if (Math.abs(dx) > Math.abs(dy) * 1.3) {
+      const limite = (dx > 0 && paginaActual <= 1) || (dx < 0 && paginaActual >= totalPaginas);
+      setArrastre(Math.max(-140, Math.min(140, dx * (limite ? 0.15 : 0.6))));
+    }
+  };
+  const terminarGesto = (evento: ReactPointerEvent<HTMLDivElement>) => {
+    const inicio = gesto.current;
+    if (!inicio || inicio.id !== evento.pointerId) return;
+    gesto.current = null; setArrastre(0);
+    const dx = evento.clientX - inicio.x;
+    const dy = evento.clientY - inicio.y;
+    if (Math.hypot(dx, dy) > 10) omitirClick.current = true;
+    if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy) * 1.3 && !cargandoPagina) {
+      if (dx < 0 && paginaActual < totalPaginas) paginaSiguiente();
+      if (dx > 0 && paginaActual > 1) paginaAnterior();
+    }
+  };
+  const cancelarGesto = () => {
+    gesto.current = null; setArrastre(0); omitirClick.current = true;
+  };
 
 
   return (
@@ -96,6 +144,12 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
       <div
         className="flex-1 relative overflow-hidden flex flex-col items-center justify-center min-h-0 pt-20 pb-24 select-none"
         onClick={alternarControles}
+        style={{ touchAction: 'pan-y pinch-zoom' }}
+        onPointerDown={iniciarGesto}
+        onPointerMove={moverGesto}
+        onPointerUp={terminarGesto}
+        onPointerCancel={cancelarGesto}
+        onLostPointerCapture={() => { gesto.current = null; setArrastre(0); }}
       >
         {estadoCarga === 'cargando' && (
           <div className="text-white">
@@ -114,9 +168,10 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
 
         {estadoCarga === 'listo' && totalPaginas > 0 && (
           <div className="w-full h-full flex items-center justify-center p-2 sm:p-6">
-            <div className="relative max-w-4xl max-h-[calc(100dvh-176px)] bg-[#fdfbf7] shadow-2xl rounded-md overflow-hidden flex items-center justify-center border border-stone-800">
+            <div style={{ transform: `translateX(${arrastre}px)`, transition: arrastre ? 'none' : 'transform 180ms ease-out' }} className="relative max-w-4xl max-h-[calc(100dvh-176px)] bg-[#fdfbf7] shadow-2xl rounded-md overflow-hidden flex items-center justify-center border border-stone-800">
               {imagenPaginaActual ? (
                 <img
+                  draggable={false}
                   src={imagenPaginaActual}
                   alt={`Página ${paginaActual}`}
                   className="max-w-full max-h-[calc(100dvh-192px)] object-contain pointer-events-none"
@@ -177,6 +232,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
           </button>
           <span role="status" aria-live="polite" className="text-center">
             Página <strong className="text-white">{paginaActual}</strong> de <strong className="text-white">{totalPaginas}</strong>
+            <span className="block text-[10px] text-stone-400">Desliza a izquierda o derecha</span>
           </span>
           <button type="button" onClick={paginaSiguiente}
             disabled={estadoCarga !== 'listo' || paginaActual >= totalPaginas || cargandoPagina}
