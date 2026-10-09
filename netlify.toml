@@ -7,3 +7,4 @@
 [build.environment]
   VITE_SUPABASE_URL = "https://wjnsukmxxykuvcwcxzgs.supabase.co"
   VITE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_MvubTEI7W6syAfyQnL5bPg_4wLFJkBr"
+  VITE_REGISTRATION_OTP_ENABLED = "true"

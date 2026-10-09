@@ -50,11 +50,11 @@ El progreso usa la fecha de lectura más reciente; «terminado» se conserva al 
 
 La PWA precarga interfaz, fuentes y visor PDF. Tras abrirla una vez con internet y completar su instalación de caché, puede abrirse sin red. El OCR es opcional y solo estará disponible sin red si sus recursos ya se usaron y almacenaron previamente. La app recuerda el último usuario confirmado para acceso local sin conexión; esto no autoriza solicitudes a la nube ni sustituye la sesión de Supabase. El cierre de sesión retira ese recuerdo. Los datos locales no están cifrados: solo activar sesiones en dispositivos de confianza. El navegador puede liberar almacenamiento bajo presión; la copia en la nube permite recuperarlo.
 
-## OTP de registro: preparado, pendiente de SMTP
+## OTP de registro: activado
 
 Por decisión del propietario, solo se pide verificación al crear la cuenta. El login habitual sigue usando correo y contraseña.
 
-El plan actual de Supabase bloquea la personalización de correos con su proveedor predeterminado. Mientras no se configure SMTP propio (o un plan compatible), `VITE_REGISTRATION_OTP_ENABLED` permanece en `false` y la app pide abrir el enlace de confirmación. No presenta como enviado un código que el correo actual no incluye.
+Se configuró SMTP propio de Brevo y se guardó la plantilla con `{{ .Token }}`. `netlify.toml` activa `VITE_REGISTRATION_OTP_ENABLED=true`. El registro pide el código por correo; el acceso habitual mantiene correo y contraseña. La entrega real sigue pendiente de una prueba con una cuenta propia.
 
 Para activar el OTP:
 1. Configurar un proveedor SMTP autorizado en Authentication → SMTP Settings.
@@ -70,7 +70,7 @@ El backend verifica el código con `verifyOtp`, tipo `email`, vinculado al corre
 - Diez pruebas automatizadas: aislamiento local entre cuentas, cola ante fallo de red, descarga y retirada, borrado remoto sin resurrección, borrado pendiente, avance simultáneo y conservación del logro terminado.
 - Prueba transaccional en Supabase de RLS entre dos usuarios y rechazo de un avance antiguo, con rollback de todos los datos temporales.
 - Compilación TypeScript, lint y generación de manifiesto/service worker.
-- El OTP enviado por correo requiere SMTP y todavía no se ha probado de extremo a extremo.
+- SMTP y plantilla OTP configurados; todavía no se ha probado el registro de extremo a extremo.
 - El asesor de Supabase no reporta problemas de RLS; avisa que la protección contra contraseñas filtradas está deshabilitada: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
 
 ## Correo sin cuota mensual de pago
@@ -79,4 +79,5 @@ Brevo ofrece un plan gratuito de SMTP con 300 correos diarios. Requiere crear y 
 - https://www.brevo.com/products/transactional-email/
 - https://help.brevo.com/hc/en-us/articles/35852083084178-Domain-setup-for-better-email-deliverability
 
-La clave SMTP se introduce exclusivamente en el panel de Supabase, nunca en Vite, GitHub ni el chat. El envío integrado de Supabase tiene restricciones de destinatarios y no debe considerarse correo público de producción. La entrega real y el OTP siguen pendientes hasta configurar un proveedor y probar un registro propio.
+La clave SMTP se introduce exclusivamente en el panel de Supabase, nunca en Vite, GitHub ni el chat. El envío integrado de Supabase tiene restricciones de destinatarios y no debe considerarse correo público de producción. Brevo ya está configurado. Falta probar la entrega y verificación con un registro propio.
+
