@@ -47,6 +47,7 @@ export function Acceso({ onPreview, recuperando, onRecuperado }: {
         : 'No pudimos completar la solicitud. Comprueba tu conexión e inténtalo nuevamente en unos minutos.');
     } finally { setOcupado(false); }
   };
+  if (correoPendiente && !recuperando) return <VerificarCorreo email={correoPendiente} onVolver={() => { setCorreoPendiente(''); cambiar('login'); }} />;
   return <div className="acceso">
     <section className="acceso-historia">
       <a className="marca" href="/" aria-label="Cuentitos, inicio"><span className="marca-icono"><BookOpen size={23} /></span><span>Cuentitos<span className="marca-punto">.</span></span></a>
@@ -62,7 +63,7 @@ export function Acceso({ onPreview, recuperando, onRecuperado }: {
       <h2>{recuperando ? 'Una nueva contraseña' : modo === 'registro' ? 'Hagamos espacio a la imaginación' : modo === 'reset' ? 'Volvamos a tu biblioteca' : 'Qué lindo verte por aquí'}</h2>
       <p>{recuperando ? 'Elige una contraseña de al menos 8 caracteres.' : modo === 'registro' ? 'Crea una cuenta con ayuda de tu familia o docente.' : modo === 'reset' ? 'Te enviaremos un enlace para recuperar el acceso.' : 'Entra a tu cuenta y encuentra tu próxima historia.'}</p>
       {!recuperando && !correoPendiente && <div className="acceso-pestanas" aria-label="Acceso a la cuenta"><button className={modo === 'login' ? 'activo' : ''} onClick={() => cambiar('login')}>Iniciar sesión</button><button className={modo === 'registro' ? 'activo' : ''} onClick={() => cambiar('registro')}>Crear cuenta</button></div>}
-      {correoPendiente && !recuperando ? <VerificarCorreo email={correoPendiente} onVolver={() => { setCorreoPendiente(''); cambiar('login'); }} /> : <form onSubmit={enviar}>
+      <form onSubmit={enviar}>
         {modo === 'registro' && !recuperando && <label>¿Cómo te llamas?<input required maxLength={40} autoComplete="nickname" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Tu nombre o apodo" /></label>}
         {!recuperando && <label>Correo electrónico<input required type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="nombre@correo.com" /></label>}
         {(modo !== 'reset' || recuperando) && <label>Contraseña<div className="campo-password"><input required minLength={modo === 'registro' || recuperando ? 8 : undefined} type={visible ? 'text' : 'password'} autoComplete={modo === 'registro' || recuperando ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="Tu contraseña" /><button type="button" aria-label={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={19} /> : <Eye size={19} />}</button></div></label>}
@@ -70,9 +71,10 @@ export function Acceso({ onPreview, recuperando, onRecuperado }: {
         {error && <p role="alert" className="mensaje-error">{error}</p>}
         {mensaje && <p role="status" className="mensaje-exito">{mensaje}</p>}
         <button className="boton-principal ancho" disabled={ocupado || !supabase} type="submit">{ocupado ? 'Un momento…' : recuperando ? 'Guardar contraseña' : modo === 'registro' ? 'Crear mi cuenta' : modo === 'reset' ? 'Enviar enlace' : 'Entrar a mi biblioteca'}<ArrowRight size={19} /></button>
-      </form>}
+      </form>
       {!supabase && <div className="aviso-config"><p>Las cuentas aún no están activadas. Puedes explorar la biblioteca en una vista previa local.</p><button className="enlace" onClick={onPreview}>Explorar vista previa <ArrowRight size={16} /></button></div>}
       <p className="pie-acceso">Hecho para leer a tu ritmo, una página a la vez.</p>
     </div></section>
   </div>;
 }
+
