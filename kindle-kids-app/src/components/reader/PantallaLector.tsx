@@ -17,6 +17,7 @@ import type { Libro, ProgresoLectura } from '../../types/libro';
 import { usePdfReader } from '../../hooks/usePdfReader';
 import { guardarProgreso } from '../../lib/storageManager';
 import { CargandoCuento } from '../shared/CargandoCuento';
+import { HojaAnimada } from './HojaAnimada';
 import { AvisoError } from '../shared/AvisoError';
 
 interface PropiedadesPantallaLector {
@@ -36,6 +37,9 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
     paginaSiguiente,
     paginaAnterior,
   } = usePdfReader(libro.fuente, libro.id);
+
+  const [girando, setGirando] = useState(false);
+  const navegacionOcupada = cargandoPagina || girando;
 
   const gesto = useRef<{ id: number; x: number; y: number } | null>(null);
   const omitirClick = useRef(false);
@@ -61,14 +65,14 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
 
   useEffect(() => {
     const manejarTecla = (evento: KeyboardEvent) => {
-      if (evento.key === 'ArrowRight') paginaSiguiente();
-      if (evento.key === 'ArrowLeft') paginaAnterior();
+      if (!navegacionOcupada && evento.key === 'ArrowRight') paginaSiguiente();
+      if (!navegacionOcupada && evento.key === 'ArrowLeft') paginaAnterior();
       if (evento.key === 'Escape') onCerrar();
     };
 
     window.addEventListener('keydown', manejarTecla);
     return () => window.removeEventListener('keydown', manejarTecla);
-  }, [paginaSiguiente, paginaAnterior, onCerrar]);
+  }, [paginaSiguiente, paginaAnterior, onCerrar, navegacionOcupada]);
 
   const alternarControles = useCallback(() => {
     if (omitirClick.current) { omitirClick.current = false; return; }
@@ -82,7 +86,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
       return;
     }
     omitirClick.current = false;
-    if (estadoCarga !== 'listo' || cargandoPagina || evento.button !== 0 ||
+    if (estadoCarga !== 'listo' || navegacionOcupada || evento.button !== 0 ||
         (evento.target as HTMLElement).closest('button, a, input')) return;
     gesto.current = { id: evento.pointerId, x: evento.clientX, y: evento.clientY };
     evento.currentTarget.setPointerCapture(evento.pointerId);
@@ -108,7 +112,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
     const dx = evento.clientX - inicio.x;
     const dy = evento.clientY - inicio.y;
     if (Math.hypot(dx, dy) > 10) omitirClick.current = true;
-    if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy) * 1.3 && !cargandoPagina) {
+    if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy) * 1.3 && !navegacionOcupada) {
       if (dx < 0 && paginaActual < totalPaginas) paginaSiguiente();
       if (dx > 0 && paginaActual > 1) paginaAnterior();
     }
@@ -168,20 +172,9 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
 
         {estadoCarga === 'listo' && totalPaginas > 0 && (
           <div className="w-full h-full flex items-center justify-center p-2 sm:p-6">
-            <div style={{ transform: `translateX(${arrastre}px)`, transition: arrastre ? 'none' : 'transform 180ms ease-out' }} className="relative max-w-4xl max-h-[calc(100dvh-176px)] bg-[#fdfbf7] shadow-2xl rounded-md overflow-hidden flex items-center justify-center border border-stone-800">
-              {imagenPaginaActual ? (
-                <img
-                  draggable={false}
-                  src={imagenPaginaActual}
-                  alt={`Página ${paginaActual}`}
-                  className="max-w-full max-h-[calc(100dvh-192px)] object-contain pointer-events-none"
-                />
-              ) : (
-                <div className="p-12 text-stone-500 text-sm font-sans">
-                  Cargando página...
-                </div>
-              )}
-            </div>
+            {imagenPaginaActual ? (
+              <HojaAnimada imagen={imagenPaginaActual} numero={paginaActual} arrastre={arrastre} onAnimando={setGirando} />
+            ) : <div className="p-12 text-stone-300 text-sm font-sans">Cargando página...</div>}
           </div>
         )}
 
@@ -200,7 +193,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
                 paginaAnterior();
               }}
               className="hidden md:flex absolute top-1/2 -translate-y-1/2 left-4 z-30 w-14 h-14 rounded-full bg-black/50 hover:bg-black/75 text-white items-center justify-center shadow-xl transition-all duration-150 ease-out active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuento-amarillo"
-              disabled={paginaActual <= 1 || cargandoPagina}
+              disabled={paginaActual <= 1 || navegacionOcupada}
               aria-label="Página anterior"
             >
               <ChevronLeft size={30} />
@@ -211,7 +204,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
                 paginaSiguiente();
               }}
               className="hidden md:flex absolute top-1/2 -translate-y-1/2 right-4 z-30 w-14 h-14 rounded-full bg-black/50 hover:bg-black/75 text-white items-center justify-center shadow-xl transition-all duration-150 ease-out active:scale-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuento-amarillo"
-              disabled={paginaActual >= totalPaginas || cargandoPagina}
+              disabled={paginaActual >= totalPaginas || navegacionOcupada}
               aria-label="Página siguiente"
             >
               <ChevronRight size={30} />
@@ -225,7 +218,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
           className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between gap-3 px-4 sm:px-6 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] bg-stone-950/95 text-stone-300 text-xs font-sans border-t border-stone-800"
         >
           <button type="button" onClick={paginaAnterior}
-            disabled={estadoCarga !== 'listo' || paginaActual <= 1 || cargandoPagina}
+            disabled={estadoCarga !== 'listo' || paginaActual <= 1 || navegacionOcupada}
             aria-label="Ir a la página anterior"
             className="flex min-h-12 min-w-12 items-center justify-center gap-1 rounded-xl bg-white/10 px-3 text-white disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-cuento-amarillo">
             <ChevronLeft size={24} /><span className="hidden sm:inline">Anterior</span>
@@ -235,7 +228,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
             <span className="block text-[10px] text-stone-400">Desliza a izquierda o derecha</span>
           </span>
           <button type="button" onClick={paginaSiguiente}
-            disabled={estadoCarga !== 'listo' || paginaActual >= totalPaginas || cargandoPagina}
+            disabled={estadoCarga !== 'listo' || paginaActual >= totalPaginas || navegacionOcupada}
             aria-label="Ir a la página siguiente"
             className="flex min-h-12 min-w-12 items-center justify-center gap-1 rounded-xl bg-white/10 px-3 text-white disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-cuento-amarillo">
             <span className="hidden sm:inline">Siguiente</span><ChevronRight size={24} />
