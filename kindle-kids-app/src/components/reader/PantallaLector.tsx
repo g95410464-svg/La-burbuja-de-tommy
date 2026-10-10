@@ -38,6 +38,13 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
     paginaAnterior,
   } = usePdfReader(libro.fuente, libro.id);
 
+  const [efectoLibro, setEfectoLibro] = useState(() => {
+    try { return localStorage.getItem('cuentitos-efecto-libro') !== 'false'; } catch { return true; }
+  });
+  const cambiarEfecto = () => {
+    const nuevo = !efectoLibro; setEfectoLibro(nuevo);
+    try { localStorage.setItem('cuentitos-efecto-libro', String(nuevo)); } catch { /* Preference still works for this session. */ }
+  };
   const [girando, setGirando] = useState(false);
   const navegacionOcupada = cargandoPagina || girando;
 
@@ -142,6 +149,10 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
         <h1 className="font-cuento font-bold text-white text-sm sm:text-base truncate flex-1">
           {libro.titulo}
         </h1>
+        <button type="button" aria-pressed={efectoLibro} onClick={cambiarEfecto} disabled={girando}
+          className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-xs font-sans text-white disabled:opacity-50">
+          Efecto libro: {efectoLibro ? 'sí' : 'no'}
+        </button>
       </header>
 
       {/* ── Área de lectura principal ───────────────────────────────── */}
@@ -173,7 +184,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
         {estadoCarga === 'listo' && totalPaginas > 0 && (
           <div className="w-full h-full flex items-center justify-center p-2 sm:p-6">
             {imagenPaginaActual ? (
-              <HojaAnimada imagen={imagenPaginaActual} numero={paginaActual} arrastre={arrastre} onAnimando={setGirando} />
+              <HojaAnimada imagen={imagenPaginaActual} numero={paginaActual} arrastre={arrastre} animacion={efectoLibro} onAnimando={setGirando} />
             ) : <div className="p-12 text-stone-300 text-sm font-sans">Cargando página...</div>}
           </div>
         )}

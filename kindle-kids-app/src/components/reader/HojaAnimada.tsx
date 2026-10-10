@@ -4,8 +4,8 @@ import './HojaAnimada.css';
 type Pagina = { imagen: string; numero: number };
 type Giro = { anterior: Pagina; nueva: Pagina; adelante: boolean };
 
-export function HojaAnimada({ imagen, numero, arrastre, onAnimando }: {
-  imagen: string; numero: number; arrastre: number; onAnimando: (valor: boolean) => void;
+export function HojaAnimada({ imagen, numero, arrastre, animacion, onAnimando }: {
+  imagen: string; numero: number; arrastre: number; animacion: boolean; onAnimando: (valor: boolean) => void;
 }) {
   const anterior = useRef<Pagina | null>(null);
   const [giro, setGiro] = useState<Giro | null>(null);
@@ -14,7 +14,7 @@ export function HojaAnimada({ imagen, numero, arrastre, onAnimando }: {
     const previa = anterior.current;
     anterior.current = nueva;
     if (!previa || previa.numero === numero) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!animacion) {
       setGiro(null); onAnimando(false); return;
     }
     setGiro({ anterior: previa, nueva, adelante: numero > previa.numero });
@@ -22,11 +22,11 @@ export function HojaAnimada({ imagen, numero, arrastre, onAnimando }: {
     // Also release controls if an animation event is interrupted by the browser.
     const timer = window.setTimeout(() => { setGiro(null); onAnimando(false); }, 850);
     return () => window.clearTimeout(timer);
-  }, [imagen, numero, onAnimando]);
+  }, [imagen, numero, animacion, onAnimando]);
   const terminar = () => { setGiro(null); onAnimando(false); };
   const fondo = giro && !giro.adelante ? giro.anterior.imagen : imagen;
   const hoja = giro?.adelante ? giro.anterior.imagen : giro?.nueva.imagen;
-  return <div className="libro-perspectiva" style={{ transform: giro ? undefined : `translateX(${arrastre * 0.3}px)` }}>
+  return <div className="libro-perspectiva" data-animacion={animacion} style={{ transform: giro ? undefined : `translateX(${arrastre * 0.3}px)` }}>
     <div className="libro-papel">
       <img className="libro-pagina" src={fondo} alt={`Página ${numero}`} draggable={false} />
       {giro && <>

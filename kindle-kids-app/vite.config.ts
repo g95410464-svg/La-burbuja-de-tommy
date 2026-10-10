@@ -13,6 +13,8 @@ export default defineConfig({
       maximumFileSizeToCacheInBytes: 3*1024*1024,
       navigateFallback: '/index.html',
       cleanupOutdatedCaches: true,
+      skipWaiting: true,
+      clientsClaim: true,
       // No Supabase endpoints or private PDFs enter the shared service-worker cache.
       runtimeCaching: [{urlPattern: /\/tesseract\//, handler:'CacheFirst', options:{cacheName:'cuentitos-ocr',expiration:{maxEntries:6,maxAgeSeconds:60*60*24*30}}}],
     },

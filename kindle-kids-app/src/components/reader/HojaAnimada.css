@@ -13,3 +13,9 @@
 @keyframes pliegue { 0%,100% { opacity:0; } 45% { opacity:1; } }
 @keyframes sombra-hoja { from { opacity:.8; } to { opacity:0; } }
 @media(prefers-reduced-motion:reduce) { .libro-hoja,.libro-pliegue,.libro-sombra { animation-duration:1ms; } .libro-perspectiva { transition:none; } }
+
+/* Explicit in-reader choice takes precedence over the global motion fallback. */
+.libro-perspectiva[data-animacion="true"] .libro-hoja-sale { animation:hoja-salir 750ms cubic-bezier(.32,.05,.26,1) both!important; }
+.libro-perspectiva[data-animacion="true"] .libro-hoja-entra { animation:hoja-entrar 750ms cubic-bezier(.32,.05,.26,1) both!important; }
+.libro-perspectiva[data-animacion="true"] .libro-pliegue { animation:pliegue 750ms ease-in-out both!important; }
+.libro-perspectiva[data-animacion="true"] .libro-sombra { animation:sombra-hoja 750ms ease-out both!important; }
