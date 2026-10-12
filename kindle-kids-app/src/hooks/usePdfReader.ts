@@ -33,6 +33,7 @@ import {
 import { ServicioOcr } from '../lib/ocr/ServicioOcr';
 import { TesseractOcr } from '../lib/ocr/TesseractOcr';
 import { bibliotecaLocal } from '../lib/storageManager';
+import { unirTextoPdf } from '../lib/textoPdf';
 
 type EstadoCarga = 'inactivo' | 'cargando' | 'listo' | 'error';
 
@@ -109,12 +110,11 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
   // usuario cambia de libro muy rápido (evita condiciones de carrera).
   const idCargaVigenteRef = useRef(0);
 
-  // ── Estado OCR (FASE 1) ─────────────────────────────────────────────
-  // Exponemos el texto OCR de la página actual SIN modificar la UI del
-  // lector (el comportamiento visual permanece idéntico). Esto queda
-  // listo para que la FASE 2 (narración) lo consuma.
+  // Text for narration: native PDF first, local OCR for scanned pages.
   const [textoOcrActual, setTextoOcrActual] = useState<string | null>(null);
   const [ocrListo, setOcrListo] = useState(false);
+  const [errorTexto, setErrorTexto] = useState('');
+  const [origenTexto, setOrigenTexto] = useState<'pdf' | 'ocr'>('pdf');
 
   // Referencias para el servicio OCR. `paginaActualRef` se actualiza de
   // forma SÍNCRONA (no espera a React) para que el callback del OCR
@@ -186,6 +186,12 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
   const obtenerServicioOcr = useCallback(() => {
     if (!servicioOcrRef.current) {
       servicioOcrRef.current = new ServicioOcr(new TesseractOcr(), {
+        onError: (id, pagina) => {
+          if (id === libroIdRef.current && pagina === paginaActualRef.current) {
+            setErrorTexto('No pudimos reconocer el texto de esta página. Vuelve a abrirla para reintentar.');
+            setOcrListo(true);
+          }
+        },
         onResultadoOcr: (resultado) => {
           if (
             resultado.libroId === libroIdRef.current &&
@@ -221,46 +227,28 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
     []
   );
 
-  /**
-   * Encola OCR con la estrategia de precarga por prioridad:
-   *   1. Página actual  → 'actual'
-   *   2. Página siguiente → 'siguiente'
-   *   3. Página anterior → 'anterior'
-   * El servicio deduplica por (libroId, página) y solo procesa las
-   * cercanas; NUNCA el libro completo.
-   */
+  /** Extract only the current page; stale results never replace its text. */
   const solicitarOcrParaPagina = useCallback(
-    (documento: PDFDocumentProxy, paginaCentral: number, totalPaginas: number) => {
-      const servicio = servicioOcrRef.current;
+    async (documento: PDFDocumentProxy, pagina: number) => {
+      const carga = idCargaVigenteRef.current;
+      const vigente = () => carga === idCargaVigenteRef.current && documentoRef.current === documento && paginaActualRef.current === pagina;
+      try {
+        const hoja = await documento.getPage(pagina);
+        const contenido = await hoja.getTextContent();
+        const texto = unirTextoPdf(contenido.items.filter((item): item is import('pdfjs-dist/types/src/display/api').TextItem => 'str' in item));
+        if (!vigente()) return;
+        if (/\p{L}/u.test(texto)) {
+          setTextoOcrActual(texto); setOrigenTexto('pdf'); setOcrListo(true);
+          return;
+        }
+      } catch { /* Image-only PDFs and unavailable text layers use OCR. */ }
+      if (!vigente()) return;
+      setOrigenTexto('ocr');
       const libro = libroIdRef.current;
-      if (!servicio || !libro) return;
-
-      servicio.solicitarPagina(
-        libro,
-        paginaCentral,
-        'actual',
-        crearProveedorImagenOcr(documento, paginaCentral)
-      );
-
-      if (paginaCentral + 1 <= totalPaginas) {
-        servicio.solicitarPagina(
-          libro,
-          paginaCentral + 1,
-          'siguiente',
-          crearProveedorImagenOcr(documento, paginaCentral + 1)
-        );
-      }
-
-      if (paginaCentral - 1 >= 1) {
-        servicio.solicitarPagina(
-          libro,
-          paginaCentral - 1,
-          'anterior',
-          crearProveedorImagenOcr(documento, paginaCentral - 1)
-        );
-      }
+      if (libro) obtenerServicioOcr().solicitarPagina(libro, pagina, 'actual', crearProveedorImagenOcr(documento, pagina));
+      else { setOcrListo(true); setErrorTexto('No se pudo preparar el texto de este libro.'); }
     },
-    [crearProveedorImagenOcr]
+    [crearProveedorImagenOcr, obtenerServicioOcr]
   );
 
   /**
@@ -282,6 +270,7 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
       // así, si un OCR termina mientras renderizamos, el callback ya sabe
       // cuál es la página objetivo y descarta resultados obsoletos.
       paginaActualRef.current = paginaAcotada;
+      setTextoOcrActual(null); setOcrListo(false); setErrorTexto('');
 
       setEstado((previo) => ({ ...previo, cargandoPagina: true }));
 
@@ -290,7 +279,7 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
 
       // Si mientras renderizábamos el usuario ya cambió de libro, este
       // resultado quedó obsoleto: lo descartamos silenciosamente.
-      if (idCarga !== idCargaVigenteRef.current) return;
+      if (idCarga !== idCargaVigenteRef.current || paginaActualRef.current !== paginaAcotada) return;
 
       setEstado((previo) => ({
         ...previo,
@@ -311,15 +300,11 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
         });
       }
 
-      // ── OCR (FASE 1) ──────────────────────────────────────────────
-      // Lanzamos el OCR de la página actual (y vecinas) con un pequeño
-      // retardo para no competir por el hilo en el mismo frame en que se
-      // pinta la imagen. El servicio se encarga de la cola de prioridad,
-      // el cache y las condiciones de carrera.
+      // Let the page paint before extracting native text or starting OCR.
       const idOcr = idCarga;
       window.setTimeout(() => {
-        if (idCargaVigenteRef.current !== idOcr) return;
-        solicitarOcrParaPagina(documento, paginaAcotada, documento.numPages);
+        if (idCargaVigenteRef.current !== idOcr || paginaActualRef.current !== paginaAcotada) return;
+        void solicitarOcrParaPagina(documento, paginaAcotada);
       }, RETARDO_INICIO_OCR_MS);
     },
     [obtenerImagenDePagina, purgarCacheLejano, solicitarOcrParaPagina]
@@ -458,9 +443,10 @@ export function usePdfReader(fuente: FuentePdf | null, libroId?: string) {
     paginaAnterior,
     esPrimeraPagina: estado.paginaActual <= 1,
     esUltimaPagina: estado.paginaActual >= estado.totalPaginas,
-    // OCR (FASE 1): texto de la página actual, expuesto para la futura
-    // narración. La UI actual no lo usa (comportamiento idéntico).
+    // Text and extraction status consumed by the narrator.
     textoOcrActual,
     ocrListo,
+    errorTexto,
+    origenTexto,
   };
 }

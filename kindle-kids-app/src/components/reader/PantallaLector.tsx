@@ -17,6 +17,7 @@ import type { Libro, ProgresoLectura } from '../../types/libro';
 import { usePdfReader } from '../../hooks/usePdfReader';
 import { guardarProgreso } from '../../lib/storageManager';
 import { CargandoCuento } from '../shared/CargandoCuento';
+import { NarradorPagina } from './NarradorPagina';
 import { HojaAnimada } from './HojaAnimada';
 import { AvisoError } from '../shared/AvisoError';
 
@@ -36,6 +37,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
     mensajeError,
     paginaSiguiente,
     paginaAnterior,
+    textoOcrActual, ocrListo, errorTexto, origenTexto,
   } = usePdfReader(libro.fuente, libro.id);
 
   const [efectoLibro, setEfectoLibro] = useState(() => {
@@ -72,6 +74,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
 
   useEffect(() => {
     const manejarTecla = (evento: KeyboardEvent) => {
+      if ((evento.target as HTMLElement).closest('input, select, textarea, audio')) return;
       if (!navegacionOcupada && evento.key === 'ArrowRight') paginaSiguiente();
       if (!navegacionOcupada && evento.key === 'ArrowLeft') paginaAnterior();
       if (evento.key === 'Escape') onCerrar();
@@ -94,7 +97,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
     }
     omitirClick.current = false;
     if (estadoCarga !== 'listo' || navegacionOcupada || evento.button !== 0 ||
-        (evento.target as HTMLElement).closest('button, a, input')) return;
+        (evento.target as HTMLElement).closest('button, a, input, select, audio, footer')) return;
     gesto.current = { id: evento.pointerId, x: evento.clientX, y: evento.clientY };
     evento.currentTarget.setPointerCapture(evento.pointerId);
   };
@@ -157,7 +160,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
 
       {/* ── Área de lectura principal ───────────────────────────────── */}
       <div
-        className="flex-1 relative overflow-hidden flex flex-col items-center justify-center min-h-0 pt-20 pb-24 select-none"
+        className="flex-1 relative overflow-hidden flex flex-col items-center justify-center min-h-0 pt-20 pb-44 select-none"
         onClick={alternarControles}
         style={{ touchAction: 'pan-y pinch-zoom' }}
         onPointerDown={iniciarGesto}
@@ -226,8 +229,10 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
         {/* Always available on touch screens, even when the header is hidden. */}
         <footer
           onClick={evento => evento.stopPropagation()}
-          className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between gap-3 px-4 sm:px-6 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] bg-stone-950/95 text-stone-300 text-xs font-sans border-t border-stone-800"
+          className="fixed bottom-0 left-0 right-0 z-40 flex flex-col gap-2 px-4 sm:px-6 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] bg-stone-950/95 text-stone-300 text-xs font-sans border-t border-stone-800"
         >
+          {estadoCarga === 'listo' && !cargandoPagina && <NarradorPagina key={`${libro.id}:${paginaActual}`} libroId={libro.id} pagina={paginaActual} texto={textoOcrActual} listo={ocrListo} error={errorTexto} origen={origenTexto} />}
+          <div className="flex w-full items-center justify-between gap-3">
           <button type="button" onClick={paginaAnterior}
             disabled={estadoCarga !== 'listo' || paginaActual <= 1 || navegacionOcupada}
             aria-label="Ir a la página anterior"
@@ -244,6 +249,7 @@ export function PantallaLector({ libro, onCerrar, onProgresoActualizado }: Propi
             className="flex min-h-12 min-w-12 items-center justify-center gap-1 rounded-xl bg-white/10 px-3 text-white disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-cuento-amarillo">
             <span className="hidden sm:inline">Siguiente</span><ChevronRight size={24} />
           </button>
+          </div>
         </footer>
       </div>
     </div>

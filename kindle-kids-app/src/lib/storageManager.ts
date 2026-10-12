@@ -9,7 +9,9 @@ export interface RegistroLibro extends Omit<Libro, 'fuente'> {
 }
 export interface ProgresoLocal extends ProgresoLectura { revision?: string; pendiente?: boolean }
 export interface ResultadoOcrCacheado extends ResultadoOcrPagina { clave: string }
+export interface NarracionLocal { clave: string; libroId: string; pagina: number; huella: string; audio: Blob; fecha: number }
 interface Esquema extends DBSchema {
+  narraciones: { key: string; value: NarracionLocal };
   libros: { key: string; value: RegistroLibro };
   progreso: { key: string; value: ProgresoLocal };
   ocrCache: { key: string; value: ResultadoOcrCacheado };
@@ -28,8 +30,9 @@ export const convertirLibro = (r: RegistroLibro): Libro => {
 // must never redirect an in-flight read, upload or acknowledgement to another user.
 export function bibliotecaLocal(id: string | null = usuario) {
   const nombre = id ? `kindle-kids-biblioteca-${id}` : 'kindle-kids-biblioteca';
-  const conexion = conexiones.get(nombre) ?? openDB<Esquema>(nombre, 2, {
+  const conexion = conexiones.get(nombre) ?? openDB<Esquema>(nombre, 3, {
     upgrade(db) {
+      if (!db.objectStoreNames.contains('narraciones')) db.createObjectStore('narraciones', { keyPath: 'clave' });
       if (!db.objectStoreNames.contains('libros')) db.createObjectStore('libros', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('progreso')) db.createObjectStore('progreso', { keyPath: 'libroId' });
       if (!db.objectStoreNames.contains('ocrCache')) db.createObjectStore('ocrCache', { keyPath: 'clave' });
@@ -48,9 +51,10 @@ export function bibliotecaLocal(id: string | null = usuario) {
     },
     async recibir(remoto: RegistroLibro) {
       const db = await conexion;
-      const tx = db.transaction(['libros','progreso','ocrCache'], 'readwrite');
+      const tx = db.transaction(['libros','progreso','ocrCache','narraciones'], 'readwrite');
       const anterior = await tx.objectStore('libros').get(remoto.id);
       if (remoto.borrado) {
+        for (const r of await tx.objectStore('narraciones').getAll()) if (r.libroId === remoto.id) await tx.objectStore('narraciones').delete(r.clave);
         // Keep the tombstone so another device cannot resurrect this ID.
         await tx.objectStore('libros').put({ ...remoto, pdfBlob: undefined, sincronizado: true });
         await tx.objectStore('progreso').delete(remoto.id);
@@ -76,19 +80,21 @@ export function bibliotecaLocal(id: string | null = usuario) {
       return convertirLibro({ ...r, pdfBlob: blob });
     },
     async quitarDescarga(libroId: string) {
-      const tx = (await conexion).transaction(['libros','ocrCache'],'readwrite');
+      const tx = (await conexion).transaction(['libros','ocrCache','narraciones'],'readwrite');
       const r = await tx.objectStore('libros').get(libroId);
       if (!r?.sincronizado || r.borrado) { await tx.done; throw new Error('Espera a que el cuento se guarde en la nube.'); }
       await tx.objectStore('libros').put({ ...r, pdfBlob: undefined });
+      for (const r of await tx.objectStore('narraciones').getAll()) if (r.libroId === libroId) await tx.objectStore('narraciones').delete(r.clave);
       for (const ocr of await tx.objectStore('ocrCache').getAll()) if (ocr.libroId === libroId) await tx.objectStore('ocrCache').delete(ocr.clave);
       await tx.done;
       avisarCambio();
     },
     async eliminar(libroId: string) {
-      const tx = (await conexion).transaction(['libros','progreso','ocrCache'],'readwrite');
+      const tx = (await conexion).transaction(['libros','progreso','ocrCache','narraciones'],'readwrite');
       const r = await tx.objectStore('libros').get(libroId);
       if (r) await tx.objectStore('libros').put({ ...r, borrado: true, sincronizado: false, pdfBlob: undefined });
       await tx.objectStore('progreso').delete(libroId);
+      for (const r of await tx.objectStore('narraciones').getAll()) if (r.libroId === libroId) await tx.objectStore('narraciones').delete(r.clave);
       for (const ocr of await tx.objectStore('ocrCache').getAll()) if (ocr.libroId === libroId) await tx.objectStore('ocrCache').delete(ocr.clave);
       await tx.done;
       avisarCambio();
@@ -113,6 +119,25 @@ export function bibliotecaLocal(id: string | null = usuario) {
       const pendiente = !!anterior?.pendiente && anterior.revision !== revisionConfirmada;
       await tx.objectStore('progreso').put({ ...masReciente, completado: p.completado || !!anterior?.completado, pendiente, revision: anterior?.revision });
       await tx.done;
+    },
+    async narracion(libroId: string, pagina: number) {
+      return (await conexion).get('narraciones', JSON.stringify([libroId, pagina]));
+    },
+    async guardarNarracion(libroId: string, pagina: number, huella: string, audio: Blob) {
+      const limite = 64 * 1024 * 1024;
+      if (audio.size > limite) throw new Error('Audio demasiado grande para guardar.');
+      const tx = (await conexion).transaction(['libros','narraciones'], 'readwrite');
+      const libro = await tx.objectStore('libros').get(libroId);
+      // Do not resurrect audio after a concurrent deletion or removal of the local PDF.
+      if (!libro || libro.borrado || !libro.pdfBlob) { await tx.done; return false; }
+      const store = tx.objectStore('narraciones');
+      const clave = JSON.stringify([libroId, pagina]);
+      const anteriores = (await store.getAll()).filter(r => r.clave !== clave);
+      const bytes = anteriores.reduce((n,r) => n + r.audio.size, audio.size);
+      if (bytes > limite) { await tx.done; return false; }
+      await store.put({ clave, libroId, pagina, huella, audio, fecha: Date.now() });
+      await tx.done;
+      return true;
     },
     async guardarOcr(r: ResultadoOcrPagina) { await (await conexion).put('ocrCache',{ ...r, clave: JSON.stringify([r.libroId,r.pagina]) }); },
     async ocr(libroId: string, pagina: number) { return (await conexion).get('ocrCache',JSON.stringify([libroId,pagina])); },

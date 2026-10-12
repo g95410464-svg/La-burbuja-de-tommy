@@ -1,6 +1,6 @@
 .libro-perspectiva { perspective:1800px; max-width:100%; transition:transform 180ms ease-out; }
 .libro-papel { perspective:1800px; position:relative; background:#fdfbf7; border-radius:3px; box-shadow:0 20px 55px #0008,3px 2px 0 #e3dfd3,6px 4px 0 #b8b4aa; }
-.libro-pagina { display:block; max-width:100%; max-height:calc(100dvh - 192px); object-fit:contain; pointer-events:none; border-radius:3px; }
+.libro-pagina { display:block; max-width:100%; max-height:calc(100dvh - 272px); object-fit:contain; pointer-events:none; border-radius:3px; }
 .libro-hoja { position:absolute; inset:0; transform-origin:left center; transform-style:preserve-3d; backface-visibility:hidden; background:#fdfbf7; border-radius:3px; box-shadow:8px 0 28px #0005; pointer-events:none; will-change:transform; }
 .libro-hoja img { width:100%; height:100%; object-fit:contain; display:block; }
 .libro-hoja-sale { animation:hoja-salir 650ms cubic-bezier(.32,.05,.26,1) both; }

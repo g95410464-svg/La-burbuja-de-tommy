@@ -70,6 +70,7 @@ interface TareaCola {
 
 /** Callbacks que el consumidor (hook) registra en el servicio. */
 export interface CallbacksServicioOcr {
+  onError?: (libroId: string, pagina: number) => void;
   /** Se dispara cuando una página tiene texto OCR (o manual) disponible. */
   onResultadoOcr: (resultado: ResultadoOcrPagina) => void;
 }
@@ -198,7 +199,8 @@ export class ServicioOcr {
       while (this.cola.size > 0) {
         const tarea = this.extraerSiguiente();
         if (!tarea) break;
-        await this.procesarTarea(tarea);
+        try { await this.procesarTarea(tarea); }
+        catch { this.notificarError(tarea); }
       }
     } finally {
       this.procesando = false;
@@ -259,6 +261,7 @@ export class ServicioOcr {
       // Renderizado perezoso: obtenemos la imagen SOLO ahora.
       const imagen = await tarea.proveedorImagen();
       if (imagen === null) {
+        this.notificarError(tarea);
         // No se pudo renderizar (p. ej. documento ya destruido). No es
         // un error fatal: simplemente no hay OCR para esta página.
         return;
@@ -288,6 +291,7 @@ export class ServicioOcr {
         `[ServicioOcr] Error en OCR de ${tarea.libroId}:${tarea.pagina}:`,
         error
       );
+      this.notificarError(tarea);
       // No propagamos: un fallo de OCR no debe romper la lectura.
     }
   }
@@ -305,6 +309,12 @@ export class ServicioOcr {
     if (generacionCapturada !== this.generacionGlobal) return;
     if (this.libroActivo !== null && this.libroActivo !== resultado.libroId) return;
     this.callbacks.onResultadoOcr(resultado);
+  }
+
+  private notificarError(tarea: TareaCola) {
+    if (tarea.generacion === this.generacionGlobal && tarea.libroId === this.libroActivo) {
+      this.callbacks.onError?.(tarea.libroId, tarea.pagina);
+    }
   }
 
   /** Asegura que el motor OCR esté inicializado (carga idioma español). */
