@@ -1,13 +1,11 @@
 // Credentials are runtime environment variables. Never use a VITE_ prefix for secrets.
 const json = (status, error) => Response.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } });
-export const escaparXml = texto => texto.replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
-
 export function crearNarrador(env, solicitar = fetch) {
   return async request => {
     if (request.method !== 'POST') return json(405, 'Usa POST.');
     if (!request.headers.get('authorization')?.startsWith('Bearer ')) return json(401, 'Inicia sesión para preparar la narración.');
-    if (!env.AZURE_SPEECH_KEY || !/^[a-z0-9]+$/.test(env.AZURE_SPEECH_REGION ?? '') || env.AZURE_SPEECH_TIER !== 'F0') {
-      return json(503, 'La voz del cuento aún no está activada. Falta conectar Azure Speech Free F0.');
+    if (!env.ELEVENLABS_API_KEY) {
+      return json(503, 'La voz del cuento aún no está activada. Falta conectar ElevenLabs.');
     }
     if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) return json(503, 'Falta configurar el acceso a la narración.');
     // Read a bounded body even when Content-Length is missing or dishonest.
@@ -37,13 +35,24 @@ export function crearNarrador(env, solicitar = fetch) {
       if (!auth.ok) return json(auth.status >= 500 ? 503 : 401, 'No se pudo verificar tu sesión. Vuelve a entrar e inténtalo.');
       const user = await auth.json();
       if (!user.id || user.is_anonymous || !user.email_confirmed_at) return json(403, 'Confirma tu correo antes de generar una narración.');
-      const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="es-MX"><voice name="es-MX-DaliaNeural"><prosody rate="-10%">${escaparXml(texto)}</prosody></voice></speak>`;
-      const respuesta = await solicitar(`https://${env.AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1`, {
-        method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': env.AZURE_SPEECH_KEY, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3', 'User-Agent': 'Cuentitos' },
-        body: ssml, signal: AbortSignal.timeout(25000),
+      const respuesta = await solicitar('https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb?output_format=mp3_44100_128', {
+        method: 'POST', headers: { 'xi-api-key': env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+        body: JSON.stringify({ text: texto, model_id: 'eleven_multilingual_v2', voice_settings: {
+          stability: 0.65, similarity_boost: 0.75, style: 0, speed: 0.9, use_speaker_boost: true,
+        } }), signal: AbortSignal.timeout(25000),
       });
-      if (respuesta.status === 429) return json(429, 'La voz alcanzó un límite temporal o la cuota gratuita. Puedes escuchar las páginas ya guardadas.');
-      if (!respuesta.ok) return json(502, 'No se pudo generar la voz. Revisa la configuración del servicio o inténtalo más tarde.');
+      if (!respuesta.ok) {
+        // ElevenLabs reports quota_exceeded as HTTP 401, not always 429.
+        // Translate known codes without forwarding upstream bodies or credentials.
+        const detalle = await respuesta.json().catch(() => null);
+        const codigo = detalle?.detail?.status;
+        if (codigo === 'quota_exceeded') return json(429, 'La clave de ElevenLabs no tiene créditos disponibles. Revisa su límite y la cuota gratuita. Puedes escuchar los audios ya guardados.');
+        if (respuesta.status === 429) return json(429, 'El servicio de voz está ocupado. Espera un minuto e inténtalo de nuevo.');
+        if (codigo === 'missing_permissions') return json(503, 'La clave de ElevenLabs necesita el permiso Text to Speech.');
+        if (codigo === 'invalid_api_key' || respuesta.status === 401) return json(503, 'No se pudo autorizar el servicio de voz. Revisa la clave de ElevenLabs.');
+        return json(502, 'No se pudo generar la voz. Inténtalo más tarde o revisa el servicio.');
+      }
+      if (!respuesta.headers.get('content-type')?.includes('audio/')) return json(502, 'El servicio no devolvió un audio válido.');
       const audio = await respuesta.arrayBuffer();
       if (!audio.byteLength || audio.byteLength > 5 * 1024 * 1024) return json(502, 'El servicio no devolvió un audio válido.');
       return new Response(audio, { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'private, no-store' } });

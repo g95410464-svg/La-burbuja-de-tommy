@@ -6,47 +6,52 @@ el cuento. El orden depende del PDF; páginas con columnas o texto dibujado requ
 revisión. «Ver texto» permite comprobar qué se va a leer.
 
 «Escuchar página» solicita una voz neuronal a través de una función de Netlify.
-La configuración inicial es Azure `es-MX-DaliaNeural`, a un ritmo 10 % menor que
-el normal. Su tono debe probarse con cuentos reales antes de darlo por aprobado.
+La configuración inicial es ElevenLabs Multilingual v2, voz George, con
+velocidad 0,9 y estabilidad 0,65. Su tono debe probarse con cuentos reales antes de darlo por aprobado.
 El audio tiene controles de reproducción, pausa, posición y velocidad. Cambiar de
 página o cerrar el lector cancela la descarga y detiene el audio. En móviles que
 bloquean la reproducción tras una descarga, se pide pulsar reproducir nuevamente.
 
-## Activar Azure sin contratar el nivel de pago
+## Activar ElevenLabs
 
-1. Crear una cuenta de Azure y un recurso **Speech** con tarifa **Free F0**.
-   Confirmar la tarifa en el propio recurso. No elegir Standard S0 ni voces HD.
-2. En el recurso, abrir **Keys and Endpoint** y obtener región y clave.
-3. En Netlify → Cuentitoss → Project configuration → Environment variables,
-   añadir las siguientes variables con ámbito **Functions** (o todos los ámbitos):
+1. Crear una cuenta gratuita de ElevenLabs y una clave con permiso **Text to Speech**.
+   La clave debe tener un límite de créditos mayor que cero. Un límite 0 bloquea
+   todas las solicitudes aunque la cuenta tenga créditos. Se puede asignar un límite
+   de hasta la cuota gratuita disponible, sin contratar un plan de pago.
+2. En Netlify → Cuentitoss → Project configuration → Environment variables,
+   añadir estas variables con ámbito **Functions** (o todos los ámbitos):
 
    | Variable | Valor |
    | --- | --- |
-   | `AZURE_SPEECH_KEY` | Clave privada del recurso Speech |
-   | `AZURE_SPEECH_REGION` | Región del recurso, por ejemplo `eastus` |
-   | `AZURE_SPEECH_TIER` | `F0`, después de verificarlo en Azure |
-   | `SUPABASE_URL` | La URL del proyecto Supabase existente |
-   | `SUPABASE_PUBLISHABLE_KEY` | La clave publicable del proyecto existente |
+   | `ELEVENLABS_API_KEY` | Clave privada de ElevenLabs |
+   | `SUPABASE_URL` | URL del proyecto Supabase existente |
+   | `SUPABASE_PUBLISHABLE_KEY` | Clave publicable del proyecto existente |
 
-4. Volver a desplegar en Netlify y probar con una cuenta de correo confirmado.
-   No poner la clave de Azure en GitHub, `netlify.toml`, una variable `VITE_` ni el chat.
+3. Volver a desplegar en Netlify y probar con una cuenta de correo confirmado.
+   No poner la clave en GitHub, `netlify.toml` ni una variable `VITE_`.
+   Para pruebas locales puede guardarse en `.env.local` (excluido de Git), usando
+   Netlify Dev. Guardarla localmente no configura el servidor de producción.
 
-`AZURE_SPEECH_TIER` es una confirmación de configuración, no una consulta a la
-facturación de Azure: quien configura debe comprobar que el recurso realmente es F0.
-El código no cambia la tarifa ni tiene alternativa de pago. F0 ofrece 500.000
-caracteres mensuales y limita las solicitudes; al alcanzar límites se muestra un
-aviso. También aplican los límites de la cuenta Netlify.
+El plan gratuito incluye 10.000 créditos mensuales, compartidos con otros productos
+usados en esa cuenta. Multilingual v2 consume un crédito por carácter. El programa
+no contrata planes ni recarga créditos. Al agotarse la cuota o el límite de la clave,
+se muestra un aviso; se pueden seguir escuchando las copias locales ya guardadas.
+También aplican los límites de Netlify.
+
+El plan gratuito es para uso no comercial y exige atribución. El reproductor muestra
+«Narración · elevenlabs.io». No quitarla de los audios publicados bajo ese plan.
+No se clonan voces: se utiliza la voz predeterminada George de ElevenLabs.
 
 La función verifica cada sesión contra Supabase Auth y exige correo confirmado.
-El texto se escapa antes de producir SSML, tiene límite de 5.000 caracteres por
-página y 32 KB por solicitud. Netlify limita la ruta a 10 solicitudes por minuto
-por IP/dominio; comprobar que la regla aparece en el registro de despliegue.
-No registrar claves, tokens ni el contenido de cuentos en logs.
+El texto se envía como JSON, con límite de 5.000 caracteres por página y 32 KB
+por solicitud. Netlify limita la ruta a 10 solicitudes por minuto por IP/dominio;
+comprobar que la regla aparece en el registro de despliegue. No registrar claves,
+tokens ni el contenido de cuentos en logs.
 
 ## Uso sin internet
 
 El PDF se analiza en el dispositivo. Al preparar una página se envía **su texto**
-a Azure para generar audio. El audio se guarda en IndexedDB, separado por cuenta,
+a ElevenLabs para generar audio. El audio se guarda en IndexedDB, separado por cuenta,
 libro, página y huella del texto/versión de voz. Repetirlo en ese dispositivo usa
 la copia local, sin gastar más caracteres. No se guarda audio en Supabase todavía:
 en otro dispositivo se genera de nuevo.
@@ -65,6 +70,6 @@ Las pruebas del proveedor usan respuestas simuladas: no validan la calidad de vo
 ni credenciales reales. Para ejecutar la función localmente usar Netlify Dev;
 `npm run dev` solo sirve la aplicación Vite.
 
-Referencias verificadas: [tarifas Azure Speech](https://azure.microsoft.com/en-us/pricing/details/speech/),
-[API de voz](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech),
+Referencias verificadas: [planes ElevenLabs](https://elevenlabs.io/pricing),
+[API de voz](https://elevenlabs.io/docs/api-reference/text-to-speech/convert),
 [variables de funciones Netlify](https://docs.netlify.com/build/functions/environment-variables/).

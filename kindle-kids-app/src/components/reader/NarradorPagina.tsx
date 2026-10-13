@@ -29,7 +29,7 @@ export function NarradorPagina({ libroId, pagina, texto, listo, error, origen }:
     const local = bibliotecaLocal();
     const vigente = () => !actual.control.signal.aborted && usuarioActual() === local.id;
     try {
-      const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`azure-dalia-lenta-v1:${texto}`));
+      const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`elevenlabs-george-v2-lenta-v1:${texto}`));
       const huella = Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
       const guardado = await local.narracion(libroId, pagina).catch(() => undefined);
       if (!vigente()) return;
@@ -86,6 +86,7 @@ export function NarradorPagina({ libroId, pagina, texto, listo, error, origen }:
       <button type="button" onClick={() => setVerTexto(!verTexto)} aria-expanded={verTexto} className="ml-auto min-h-11 px-2 text-xs text-violet-200 underline">{verTexto ? 'Ocultar texto' : 'Ver texto'}</button>
     </div>
     <p role="status" className="mt-1 text-[11px] leading-4 text-stone-300">{error || (!listo ? 'Preparando el texto de esta página…' : !texto?.trim() ? 'No se encontró texto para leer en esta página.' : mensaje || 'Voz en español. La primera preparación necesita internet.')}</p>
+    <p className="mt-1 text-[10px] text-stone-400">Narración · <a href="https://elevenlabs.io" target="_blank" rel="noreferrer" className="underline focus-visible:ring-2 focus-visible:ring-white">elevenlabs.io</a></p>
     {verTexto && <div className="mt-2 max-h-[25dvh] overflow-y-auto rounded-xl bg-white p-3 text-sm leading-relaxed text-stone-900 select-text" tabIndex={0}>
       {origen === 'ocr' && <p className="mb-2 text-xs text-stone-600">Texto reconocido de la imagen: puede contener errores.</p>}
       {texto || 'Todavía no hay texto disponible.'}

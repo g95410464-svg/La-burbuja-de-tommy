@@ -6,14 +6,14 @@ import { unirTextoPdf } from '../src/lib/textoPdf.ts';
 import { bibliotecaLocal, seleccionarBiblioteca } from '../src/lib/storageManager.ts';
 import type { Libro } from '../src/types/libro.ts';
 
-const env = { AZURE_SPEECH_KEY: 'private-test-key', AZURE_SPEECH_REGION: 'eastus', AZURE_SPEECH_TIER: 'F0', SUPABASE_URL: 'https://auth.example', SUPABASE_PUBLISHABLE_KEY: 'public-test-key' };
+const env = { ELEVENLABS_API_KEY: 'private-test-key', SUPABASE_URL: 'https://auth.example', SUPABASE_PUBLISHABLE_KEY: 'public-test-key' };
 const request = (texto = 'Había una vez un pequeño conejo.', token = 'test-token') => new Request('https://cuento.example/.netlify/functions/narrar', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: JSON.stringify({ texto }) });
 
-test('voz requiere configuración gratuita, sesión verificada y correo confirmado antes de llamar Azure', async () => {
+test('voz requiere configuración, sesión verificada y correo confirmado antes de llamar ElevenLabs', async () => {
   let llamadas = 0;
   const nunca = async () => { llamadas++; throw new Error('No debe llamarse'); };
   assert.equal((await crearNarrador(env, nunca)(request('cuento', ''))).status, 401);
-  assert.equal((await crearNarrador({ ...env, AZURE_SPEECH_TIER: 'S0' }, nunca)(request())).status, 503);
+  assert.equal((await crearNarrador({ ...env, ELEVENLABS_API_KEY: '' }, nunca)(request())).status, 503);
   assert.equal((await crearNarrador(env, nunca)(request('a'.repeat(5001)))).status, 400);
   assert.equal(llamadas, 0);
   const invalido = await crearNarrador(env, async () => { llamadas++; return Response.json({}, { status: 401 }); })(request());
@@ -22,18 +22,21 @@ test('voz requiere configuración gratuita, sesión verificada y correo confirma
   assert.equal(sinConfirmar.status, 403);
 });
 
-test('voz convierte texto literal en SSML seguro y devuelve audio privado sin claves', async () => {
+test('voz envía texto literal como JSON y devuelve audio privado sin claves', async () => {
   const llamadas: Array<{ url: string; opciones: RequestInit }> = [];
   const servicio = crearNarrador(env, async (url: string, opciones: RequestInit) => {
     llamadas.push({ url, opciones });
-    return llamadas.length === 1 ? Response.json({ id: 'a', email_confirmed_at: '2026-01-01' }) : new Response(new Uint8Array([1, 2, 3]));
+    return llamadas.length === 1 ? Response.json({ id: 'a', email_confirmed_at: '2026-01-01' }) : new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'audio/mpeg' } });
   });
   const respuesta = await servicio(request('<audio src="evil"/> & cuento'));
   assert.equal(respuesta.status, 200);
   assert.equal(respuesta.headers.get('content-type'), 'audio/mpeg');
   assert.equal(respuesta.headers.get('cache-control'), 'private, no-store');
-  assert.match(String(llamadas[1].opciones.body), /&lt;audio src=&quot;evil&quot;\/&gt; &amp; cuento/);
-  assert.equal(llamadas[1].url, 'https://eastus.tts.speech.microsoft.com/cognitiveservices/v1');
+  const enviado = JSON.parse(String(llamadas[1].opciones.body));
+  assert.equal(enviado.text, '<audio src="evil"/> & cuento');
+  assert.equal(enviado.model_id, 'eleven_multilingual_v2');
+  assert.equal(enviado.voice_settings.speed, 0.9);
+  assert.equal(llamadas[1].url, 'https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb?output_format=mp3_44100_128');
   assert.deepEqual([...new Uint8Array(await respuesta.arrayBuffer())], [1,2,3]);
 });
 
@@ -41,10 +44,22 @@ test('agotamiento de cuota y errores del proveedor no exponen respuestas interna
   for (const codigo of [429, 401, 500]) {
     let n = 0;
     const respuesta = await crearNarrador(env, async () => ++n === 1 ? Response.json({ id: 'a', email_confirmed_at: 'yes' }) : new Response('private-test-key', { status: codigo }))(request());
-    assert.equal(respuesta.status, codigo === 429 ? 429 : 502);
+    assert.equal(respuesta.status, codigo === 429 ? 429 : codigo === 401 ? 503 : 502);
     assert.equal((await respuesta.text()).includes('private-test-key'), false);
     assert.equal(n, 2);
   }
+});
+
+test('quota_exceeded de ElevenLabs devuelve aviso de créditos aunque llegue como HTTP 401', async () => {
+  let llamadas = 0;
+  const respuesta = await crearNarrador(env, async () => ++llamadas === 1
+    ? Response.json({ id: 'a', email_confirmed_at: 'yes' })
+    : Response.json({ detail: { status: 'quota_exceeded', message: 'private-test-key' } }, { status: 401 }))(request());
+  assert.equal(respuesta.status, 429);
+  const body = await respuesta.text();
+  assert.match(body, /créditos/);
+  assert.equal(body.includes('private-test-key'), false);
+  assert.equal(llamadas, 2);
 });
 
 test('texto PDF une palabras partidas y mantiene acentos y el orden original', () => {
